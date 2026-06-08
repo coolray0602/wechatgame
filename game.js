@@ -1,100 +1,400 @@
-// game.js - 福了個哥（百分比布局版）
+// game.js - 福了個哥（響應式完整版）
 
-// ==================== 百分比配置（所有数值为屏幕宽高的百分比） ====================
-const CONFIG = {
-    // 卡牌区域
-    cardCols: 5,                 // 列数（固定）
-    cardRows: 8,                 // 行数（固定）
-    cardWidthPercent: 12,        // 卡牌宽度占屏幕宽度的百分比（约 12%）
-    cardAreaTopPercent: 28,      // 卡牌区域顶部位置（屏幕高度百分比）
-    cardAreaBottomPercent: 72,   // 卡牌区域底部位置（屏幕高度百分比）
-    
-    // 顶部文字区域
-    titleTopPercent: 10,          // 标题顶部位置
-    titleFontPercent: 6,         // 标题字体大小（屏幕宽度百分比）
-    levelTopPercent: 13,         // 关卡文字顶部位置
-    levelFontPercent: 4,         // 关卡文字大小
-    bestTopPercent: 16,          // 最高分顶部位置
-    bestFontPercent: 3.5,        // 最高分文字大小
-    
-    // 分数面板
-    scorePanelTopPercent: 10,      // 分数面板顶部位置
-    scorePanelRightPercent: 3,    // 分数面板右边距（屏幕宽度百分比）
-    scorePanelWidthPercent: 20,   // 分数面板宽度
-    scorePanelHeightPercent: 5,   // 分数面板高度
-    scoreFontPercent: 4.5,        // 分数数字大小
-    
-    // 设置按钮
-    settingsBtnTopPercent: 20,    // 设置按钮顶部位置
-    settingsBtnLeftPercent: 3,    // 设置按钮左边距
-    settingsBtnWidthPercent: 10,  // 设置按钮宽度
-    settingsBtnHeightPercent: 5,  // 设置按钮高度
-    settingsBtnFontPercent: 3,    // 设置按钮字体大小
-    
-    // 卡槽区域
-    slotBottomPercent: 12,        // 卡槽底部距离屏幕底部的百分比
-    slotWidthPercent: 85,         // 卡槽宽度
-    slotHeightPercent: 7,         // 卡槽高度
-    
-    // 按钮区域
-    btnBottomPercent: 5,          // 按钮底部距离屏幕底部的百分比
-    btnWidthPercent: 18,          // 单个按钮宽度
-    btnHeightPercent: 6,          // 单个按钮高度
-    btnFontPercent: 3.5,          // 按钮字体大小
-    
-    // 设置面板
-    panelWidthPercent: 70,        // 设置面板宽度
-    panelHeightPercent: 55,       // 设置面板高度
-};
+// ==================== 可調整參數（基礎值，會根據螢幕大小自動調整） ====================
+const BASE_CARD_SIZE = 65;
+const COLS = 5;
+const ROWS = 8;
 
 // ==================== 音效配置 ====================
 const CLICK_SOUND_URL = 'images/click.mp3';
 const BGM1_URL = 'images/bgm1.mp3';
 const BGM2_URL = 'images/bgm2.mp3';
 
-// 图片资源
-const CARD_IMAGES = {
-    'drill': 'card_drill.png', 'driver': 'card_driver.png', 'goggle': 'card_goggle.png',
-    'hammer': 'card_hammer.png', 'machine': 'card_machine.png', 'plier': 'card_plier.png',
-    'resistor': 'card_resistor.png', 'screw': 'card_screw.png', 'vr': 'card_vr.png', 'wrench': 'card_wrench.png'
-};
-const CARD_KEYS = ['drill','driver','goggle','hammer','machine','plier','resistor','screw','vr','wrench'];
+let clickAudio = null;
+let bgmAudio = null;
+let currentBgmIndex = 1;
+let bgmEnabled = true;
+let sfxEnabled = true;
 
-// 全局变量
-let screenWidth, screenHeight;
-let CARD_SIZE, GRID_STEP, HALF_SHIFT;
-let offsetX, offsetY;  // 卡牌区域偏移
-let scaleFactor = 1;
+// ==================== 洗牌次數限制 ====================
+let shuffleRemainingCount = 3;
 
-// 音效
-let clickAudio = null, bgmAudio = null;
-let currentBgmIndex = 1, bgmEnabled = true, sfxEnabled = true;
+// ==================== 關卡選擇器 ====================
+let settingsVisible = false;
+let selectedLevel = 1;
 
-// 游戏状态
-let gameActive = true, score = 0, slotCards = [], stackCards = [], nextCardId = 1;
-let currentLevel = 1, TOTAL_LEVELS = 10, levelBestScores = new Array(10).fill(0);
-let shuffleRemainingCount = 3, settingsVisible = false;
+// ==================== 禁止位置配置 ====================
 let forbiddenPositions = [];
+
+// ==================== 動態縮放變數 ====================
+let CARD_SIZE, GRID_STEP, HALF_SHIFT;
+let PAD_LEFT, PAD_TOP;
+let SLOT_X_OFFSET, SLOT_Y_OFFSET, BTN_Y_OFFSET;
+
+function calculateDynamicSizes() {
+    const sys = wx.getSystemInfoSync();
+    const screenWidth = sys.screenWidth;
+    const screenHeight = sys.screenHeight;
+    
+    // 根據螢幕寬度計算縮放比例
+    const scaleFactor = Math.min(screenWidth / 375, screenHeight / 667) * 1.0;
+    
+    CARD_SIZE = Math.round(BASE_CARD_SIZE * scaleFactor);
+    GRID_STEP = CARD_SIZE;
+    HALF_SHIFT = CARD_SIZE / 2;
+    
+    PAD_LEFT = Math.round(20 * scaleFactor);
+    PAD_TOP = Math.round(170 * scaleFactor);
+    
+    SLOT_X_OFFSET = Math.round(-20 * scaleFactor);
+    SLOT_Y_OFFSET = Math.round(-40 * scaleFactor);
+    BTN_Y_OFFSET = 0;
+}
+
+function generateForbiddenPositions(level) {
+    const forbiddenCount = 10 + (level - 1) * 3;
+    const allBasePositions = generateBaseGridForForbidden();
+    
+    for (let i = allBasePositions.length - 1; i > 0; i--) {
+        let j = Math.floor(Math.random() * (i + 1));
+        [allBasePositions[i], allBasePositions[j]] = [allBasePositions[j], allBasePositions[i]];
+    }
+    
+    return allBasePositions.slice(0, forbiddenCount);
+}
+
+function generateBaseGridForForbidden() {
+    let points = [];
+    for (let c = 0; c < COLS; c++) {
+        for (let r = 0; r < ROWS; r++) {
+            points.push({ 
+                x: BASE_MIN_X + c * GRID_STEP, 
+                y: BASE_MIN_Y + r * GRID_STEP 
+            });
+        }
+    }
+    return points;
+}
+
+function isPositionForbidden(x, y) {
+    for (let pos of forbiddenPositions) {
+        if (Math.abs(pos.x - x) < 1 && Math.abs(pos.y - y) < 1) {
+            return true;
+        }
+    }
+    return false;
+}
+
+function getAvailableBasePositions(layer, existingCards) {
+    let occupied = new Set();
+    for (let c of existingCards) {
+        if (c.layer === layer) occupied.add(`${c.x},${c.y}`);
+    }
+    return BASE_POSITIONS.filter(p => {
+        if (occupied.has(`${p.x},${p.y}`)) return false;
+        if (isPositionForbidden(p.x, p.y)) return false;
+        return true;
+    });
+}
+
+// ==================== 關卡配置 ====================
+function getLevelConfig(level) {
+    let layers = 5 + (level - 1) * 2;
+    let cardsPerLayer = 18;
+    return { layers, cardsPerLayer };
+}
+
+// ==================== 圖片資源配置 ====================
+const CARD_IMAGES = {
+    'drill': 'card_drill.png',
+    'driver': 'card_driver.png',
+    'goggle': 'card_goggle.png',
+    'hammer': 'card_hammer.png',
+    'machine': 'card_machine.png',
+    'plier': 'card_plier.png',
+    'resistor': 'card_resistor.png',
+    'screw': 'card_screw.png',
+    'vr': 'card_vr.png',
+    'wrench': 'card_wrench.png'
+};
+
+const CARD_KEYS = ['drill', 'driver', 'goggle', 'hammer', 'machine', 'plier', 'resistor', 'screw', 'vr', 'wrench'];
 let loadedImages = {};
 
-// 动画
+// ==================== 動畫相關變數 ====================
 let activeAnimations = [];
-let prevAnimLen = 0;
 
-// 画布
+// ==================== 全域變數 ====================
 let canvas, ctx;
+let gameActive = true;
+let score = 0;
+let slotCards = [];
+let stackCards = [];
+let nextCardId = 1;
 
-// UI 布局缓存（每帧计算）
-let ui = {};
+let currentLevel = 1;
+const TOTAL_LEVELS = 10;
+let levelBestScores = new Array(TOTAL_LEVELS).fill(0);
 
-// 颜色
+let screenWidth, screenHeight;
+let offsetX = 0, offsetY = 0;
+let cardScale = 1;
+
+let resetBtnRect = { x: 0, y: 0, w: 95, h: 42 };
+let shuffleBtnRect = { x: 0, y: 0, w: 95, h: 42 };
+let settingsBtnRect = { x: 0, y: 0, w: 80, h: 35 };
+
+// 顏色主題
 const colors = {
-    bg: '#ffffff', cardLight: '#fff7e8', cardDark: '#e8d8c0', border: '#b97f3a',
-    text: '#5a2f0a', scoreBg: '#2c2b28', scoreText: '#ffeaac', slotBg: '#e7dbb6',
-    titleText: '#5a3c1a', subtitleText: '#8b6942', remainText: '#4a2e0a', settingsPanel: '#fef3dd'
+    bg: '#ffffff',
+    cardLight: '#fff7e8',
+    cardDark: '#e8d8c0',
+    border: '#b97f3a',
+    text: '#5a2f0a',
+    scoreBg: '#2c2b28',
+    scoreText: '#ffeaac',
+    slotBg: '#e7dbb6',
+    titleText: '#5a3c1a',
+    subtitleText: '#8b6942',
+    remainText: '#4a2e0a',
+    settingsPanel: '#fef3dd'
 };
 
-// ==================== 工具函数 ====================
+// ==================== 動態計算的邊界 ====================
+let BASE_MIN_X = 0;
+let BASE_MIN_Y = 0;
+let BASE_MAX_X = 0;
+let BASE_MAX_Y = 0;
+let MIN_X = 0;
+let MAX_X = 0;
+let MIN_Y = 0;
+let MAX_Y = 0;
+let BASE_POSITIONS = [];
+
+// ==================== 音效初始化 ====================
+function initAudio() {
+    clickAudio = wx.createInnerAudioContext();
+    clickAudio.src = CLICK_SOUND_URL;
+    clickAudio.volume = 0.5;
+    clickAudio.onError((err) => {
+        console.error("點擊音效載入失敗:", err);
+    });
+    
+    bgmAudio = wx.createInnerAudioContext();
+    bgmAudio.src = BGM1_URL;
+    bgmAudio.loop = true;
+    bgmAudio.volume = 0.4;
+    bgmAudio.onError((err) => {
+        console.error("背景音樂載入失敗:", err);
+    });
+    
+    if (bgmEnabled) {
+        bgmAudio.play();
+    }
+}
+
+function playClickSound() {
+    if (sfxEnabled && clickAudio) {
+        clickAudio.stop();
+        clickAudio.play();
+    }
+}
+
+function toggleBgm() {
+    bgmEnabled = !bgmEnabled;
+    if (bgmEnabled) {
+        bgmAudio.play();
+    } else {
+        bgmAudio.stop();
+    }
+}
+
+function toggleSfx() {
+    sfxEnabled = !sfxEnabled;
+}
+
+function switchBgm() {
+    if (currentBgmIndex === 1) {
+        currentBgmIndex = 2;
+        bgmAudio.src = BGM2_URL;
+    } else {
+        currentBgmIndex = 1;
+        bgmAudio.src = BGM1_URL;
+    }
+    if (bgmEnabled) {
+        bgmAudio.play();
+    }
+}
+
+// ==================== 圖片載入 ====================
+function loadCardImages() {
+    return new Promise((resolve) => {
+        let loadedCount = 0;
+        const totalImages = CARD_KEYS.length;
+        
+        for (let key of CARD_KEYS) {
+            const img = wx.createImage();
+            img.src = `images/${CARD_IMAGES[key]}`;
+            img.onload = () => {
+                loadedCount++;
+                loadedImages[key] = img;
+                if (loadedCount === totalImages) {
+                    console.log(`所有卡牌圖片載入完成，共 ${totalImages} 張`);
+                    resolve();
+                }
+            };
+            img.onerror = (err) => {
+                console.error(`載入圖片失敗: images/${CARD_IMAGES[key]}`, err);
+                loadedCount++;
+                loadedImages[key] = null;
+                if (loadedCount === totalImages) {
+                    resolve();
+                }
+            };
+        }
+    });
+}
+
+// ==================== 基礎網格生成 ====================
+function generateBaseGrid() {
+    let points = [];
+    for (let c = 0; c < COLS; c++) {
+        for (let r = 0; r < ROWS; r++) {
+            points.push({ 
+                x: BASE_MIN_X + c * GRID_STEP, 
+                y: BASE_MIN_Y + r * GRID_STEP 
+            });
+        }
+    }
+    return points;
+}
+
+function getOffsetPositionByDir(basePos, dir) {
+    const dirs = [
+        [0, -HALF_SHIFT], [0, HALF_SHIFT],
+        [-HALF_SHIFT, 0], [HALF_SHIFT, 0],
+        [-HALF_SHIFT, -HALF_SHIFT], [HALF_SHIFT, -HALF_SHIFT],
+        [-HALF_SHIFT, HALF_SHIFT], [HALF_SHIFT, HALF_SHIFT]
+    ];
+    let [dx, dy] = dirs[dir % dirs.length];
+    let x = basePos.x + dx;
+    let y = basePos.y + dy;
+    if (x >= MIN_X && x <= MAX_X && y >= MIN_Y && y <= MAX_Y) {
+        return { x, y };
+    }
+    return null;
+}
+
+// ==================== 重疊檢測 ====================
+function doesOverlap(newX, newY, layer, existingCards) {
+    const newLeft = newX - CARD_SIZE/2;
+    const newRight = newX + CARD_SIZE/2;
+    const newTop = newY - CARD_SIZE/2;
+    const newBottom = newY + CARD_SIZE/2;
+    for (let c of existingCards) {
+        if (c.layer !== layer) continue;
+        const left = c.x - CARD_SIZE/2;
+        const right = c.x + CARD_SIZE/2;
+        const top = c.y - CARD_SIZE/2;
+        const bottom = c.y + CARD_SIZE/2;
+        if (newRight > left && newLeft < right && newBottom > top && newTop < bottom) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// ==================== 關卡生成 ====================
+function generateLevel(level) {
+    let cfg = getLevelConfig(level);
+    let cards = [];
+    let id = 1;
+    let layerDirs = [];
+
+    for (let layer = 0; layer < cfg.layers; layer++) {
+        let targetCount = cfg.cardsPerLayer;
+        let availableBase = getAvailableBasePositions(layer, cards);
+        let toPlace = Math.min(targetCount, availableBase.length);
+        
+        for (let i = availableBase.length - 1; i > 0; i--) {
+            let j = Math.floor(Math.random() * (i + 1));
+            [availableBase[i], availableBase[j]] = [availableBase[j], availableBase[i]];
+        }
+
+        let layerOffsetDir = -1;
+        if (layer === 0) {
+            layerOffsetDir = -1;
+        } else {
+            let availableDirs = [0, 1, 2, 3, 4, 5, 6, 7];
+            let prevDir = layerDirs[layer - 1];
+            if (prevDir !== -1) {
+                availableDirs = availableDirs.filter(d => d !== prevDir);
+            }
+            if (availableDirs.length === 0) {
+                availableDirs = [0, 1, 2, 3, 4, 5, 6, 7];
+            }
+            let randomIndex = Math.floor(Math.random() * availableDirs.length);
+            layerOffsetDir = availableDirs[randomIndex];
+        }
+        layerDirs.push(layerOffsetDir);
+
+        for (let i = 0; i < toPlace; i++) {
+            let basePos = availableBase[i];
+            let finalPos = { ...basePos };
+            if (layer > 0 && layerOffsetDir !== -1) {
+                let offsetPos = getOffsetPositionByDir(basePos, layerOffsetDir);
+                if (offsetPos) finalPos = offsetPos;
+            }
+            cards.push({ id: id++, x: finalPos.x, y: finalPos.y, layer: layer });
+        }
+    }
+
+    let total = cards.length;
+    let remainder = total % 3;
+    if (remainder !== 0) {
+        let need = 3 - remainder;
+        for (let attempt = 0; attempt < need; attempt++) {
+            let added = false;
+            for (let layer = cfg.layers - 1; layer >= 0 && !added; layer--) {
+                let offsetDir = layerDirs[layer];
+                let shuffledBase = [...BASE_POSITIONS];
+                for (let i = shuffledBase.length - 1; i > 0; i--) {
+                    let j = Math.floor(Math.random() * (i + 1));
+                    [shuffledBase[i], shuffledBase[j]] = [shuffledBase[j], shuffledBase[i]];
+                }
+                for (let base of shuffledBase) {
+                    if (isPositionForbidden(base.x, base.y)) continue;
+                    
+                    let candidateX = base.x;
+                    let candidateY = base.y;
+                    if (layer > 0 && offsetDir !== -1) {
+                        let offset = getOffsetPositionByDir(base, offsetDir);
+                        if (offset) {
+                            candidateX = offset.x;
+                            candidateY = offset.y;
+                        }
+                    }
+                    let occupied = false;
+                    for (let c of cards) {
+                        if (c.layer === layer && Math.abs(c.x - candidateX) < 1 && Math.abs(c.y - candidateY) < 1) {
+                            occupied = true;
+                            break;
+                        }
+                    }
+                    if (occupied) continue;
+                    if (!doesOverlap(candidateX, candidateY, layer, cards)) {
+                        cards.push({ id: id++, x: candidateX, y: candidateY, layer: layer });
+                        added = true;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    return { cards };
+}
+
+// ==================== 輔助函數 ====================
 function shuffleArray(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
         let j = Math.floor(Math.random() * (i + 1));
@@ -103,322 +403,306 @@ function shuffleArray(arr) {
     return arr;
 }
 
-// 将百分比转换为实际像素
-function pctW(percent) { return screenWidth * percent / 100; }
-function pctH(percent) { return screenHeight * percent / 100; }
-
-// ==================== 音效 ====================
-function initAudio() {
-    clickAudio = wx.createInnerAudioContext(); clickAudio.src = CLICK_SOUND_URL; clickAudio.volume = 0.5;
-    bgmAudio = wx.createInnerAudioContext(); bgmAudio.src = BGM1_URL; bgmAudio.loop = true; bgmAudio.volume = 0.4;
-    if (bgmEnabled) bgmAudio.play();
-}
-function playClickSound() { if (sfxEnabled && clickAudio) { clickAudio.stop(); clickAudio.play(); } }
-function toggleBgm() { bgmEnabled = !bgmEnabled; bgmEnabled ? bgmAudio.play() : bgmAudio.stop(); }
-function toggleSfx() { sfxEnabled = !sfxEnabled; }
-function switchBgm() { currentBgmIndex = currentBgmIndex === 1 ? 2 : 1; bgmAudio.src = currentBgmIndex === 1 ? BGM1_URL : BGM2_URL; if (bgmEnabled) bgmAudio.play(); }
-
-// ==================== 图片加载 ====================
-function loadCardImages() {
-    return new Promise((resolve) => {
-        let loaded = 0;
-        const total = CARD_KEYS.length;
-        for (let key of CARD_KEYS) {
-            const img = wx.createImage();
-            img.src = `images/${CARD_IMAGES[key]}`;
-            img.onload = () => { loadedImages[key] = img; if (++loaded === total) resolve(); };
-            img.onerror = () => { loadedImages[key] = null; if (++loaded === total) resolve(); };
-            loadedImages[key] = img;
-        }
-    });
+function generateIconPool(totalCards) {
+    if (totalCards % 3 !== 0) totalCards = Math.ceil(totalCards / 3) * 3;
+    let pool = [];
+    let idx = 0;
+    while (pool.length < totalCards) {
+        let icon = CARD_KEYS[idx % CARD_KEYS.length];
+        for (let i = 0; i < 3 && pool.length < totalCards; i++) pool.push(icon);
+        idx++;
+    }
+    return shuffleArray(pool);
 }
 
-// ==================== 布局计算 ====================
-function updateLayout() {
-    // 卡牌尺寸：基于屏幕宽度百分比，同时确保不超出区域
-    let desiredSize = pctW(CONFIG.cardWidthPercent);
-    // 根据行数和列数计算可用空间限制
-    const maxWidthByCols = (screenWidth - 40) / CONFIG.cardCols;
-    const maxHeightByRows = (pctH(CONFIG.cardAreaBottomPercent) - pctH(CONFIG.cardAreaTopPercent)) / CONFIG.cardRows;
-    CARD_SIZE = Math.min(desiredSize, maxWidthByCols, maxHeightByRows);
-    CARD_SIZE = Math.max(CARD_SIZE, 30); // 最小30
-    GRID_STEP = CARD_SIZE;
-    HALF_SHIFT = CARD_SIZE / 2;
-    
-    // 卡牌区域逻辑尺寸
-    const logicWidth = (CONFIG.cardCols - 1) * GRID_STEP + CARD_SIZE;
-    const logicHeight = (CONFIG.cardRows - 1) * GRID_STEP + CARD_SIZE;
-    
-    // 卡牌区域居中
-    const cardAreaCenterX = screenWidth / 2;
-    const cardAreaCenterY = (pctH(CONFIG.cardAreaTopPercent) + pctH(CONFIG.cardAreaBottomPercent)) / 2;
-    offsetX = cardAreaCenterX - logicWidth / 2;
-    offsetY = cardAreaCenterY - logicHeight / 2;
-    
-    // 设置卡牌坐标边界
-    window.BASE_MIN_X = 0;
-    window.BASE_MIN_Y = 0;
-    window.BASE_MAX_X = (CONFIG.cardCols - 1) * GRID_STEP;
-    window.BASE_MAX_Y = (CONFIG.cardRows - 1) * GRID_STEP;
-    window.MIN_X = -CARD_SIZE/2;
-    window.MAX_X = window.BASE_MAX_X + CARD_SIZE/2;
-    window.MIN_Y = -CARD_SIZE/2;
-    window.MAX_Y = window.BASE_MAX_Y + CARD_SIZE/2;
-    
-    // 缓存所有 UI 元素位置
-    ui = {
-        title: { y: pctH(CONFIG.titleTopPercent), fontSize: pctW(CONFIG.titleFontPercent) },
-        level: { y: pctH(CONFIG.levelTopPercent), fontSize: pctW(CONFIG.levelFontPercent) },
-        best: { y: pctH(CONFIG.bestTopPercent), fontSize: pctW(CONFIG.bestFontPercent) },
-        scorePanel: {
-            y: pctH(CONFIG.scorePanelTopPercent),
-            right: pctW(CONFIG.scorePanelRightPercent),
-            width: pctW(CONFIG.scorePanelWidthPercent),
-            height: pctH(CONFIG.scorePanelHeightPercent),
-            fontSize: pctW(CONFIG.scoreFontPercent)
-        },
-        settingsBtn: {
-            y: pctH(CONFIG.settingsBtnTopPercent),
-            left: pctW(CONFIG.settingsBtnLeftPercent),
-            width: pctW(CONFIG.settingsBtnWidthPercent),
-            height: pctH(CONFIG.settingsBtnHeightPercent),
-            fontSize: pctW(CONFIG.settingsBtnFontPercent)
-        },
-        slot: {
-            bottom: pctH(CONFIG.slotBottomPercent),
-            width: pctW(CONFIG.slotWidthPercent),
-            height: pctH(CONFIG.slotHeightPercent)
-        },
-        btn: {
-            bottom: pctH(CONFIG.btnBottomPercent),
-            width: pctW(CONFIG.btnWidthPercent),
-            height: pctH(CONFIG.btnHeightPercent),
-            fontSize: pctW(CONFIG.btnFontPercent)
-        },
-        panel: {
-            width: pctW(CONFIG.panelWidthPercent),
-            height: pctH(CONFIG.panelHeightPercent)
-        }
-    };
+// ==================== 遊戲邏輯 ====================
+function isRectOverlap(card1, card2) {
+    const h = CARD_SIZE/2;
+    const l1 = card1.x - h, r1 = card1.x + h, t1 = card1.y - h, b1 = card1.y + h;
+    const l2 = card2.x - h, r2 = card2.x + h, t2 = card2.y - h, b2 = card2.y + h;
+    return !(r1 <= l2 || l1 >= r2 || b1 <= t2 || t1 >= b2);
 }
 
-// ==================== 位置生成（与之前相同，使用新边界）====================
-function generateBaseGrid() {
-    let points = [];
-    for (let c = 0; c < CONFIG.cardCols; c++) {
-        for (let r = 0; r < CONFIG.cardRows; r++) {
-            points.push({ x: c * GRID_STEP, y: r * GRID_STEP });
+function isCardCovered(card, allCards) {
+    const upper = allCards.filter(c => !c.removed && c.layer > card.layer);
+    for (let u of upper) {
+        if (isRectOverlap(card, u)) return true;
+    }
+    return false;
+}
+
+function updateAllCardsClickable() {
+    for (let card of stackCards) {
+        if (!card.removed) {
+            card.clickable = !isCardCovered(card, stackCards);
         }
     }
-    return points;
 }
-function getOffsetPositionByDir(basePos, dir) {
-    const dirs = [[0,-HALF_SHIFT],[0,HALF_SHIFT],[-HALF_SHIFT,0],[HALF_SHIFT,0],
-                  [-HALF_SHIFT,-HALF_SHIFT],[HALF_SHIFT,-HALF_SHIFT],
-                  [-HALF_SHIFT,HALF_SHIFT],[HALF_SHIFT,HALF_SHIFT]];
-    let [dx, dy] = dirs[dir % 8];
-    let x = basePos.x + dx, y = basePos.y + dy;
-    if (x >= window.MIN_X && x <= window.MAX_X && y >= window.MIN_Y && y <= window.MAX_Y) return { x, y };
-    return null;
-}
-function generateForbiddenPositions(level) {
-    const cnt = 10 + (level - 1) * 3;
-    let all = generateBaseGrid();
-    for (let i = all.length - 1; i > 0; i--) { let j = Math.floor(Math.random() * (i + 1)); [all[i], all[j]] = [all[j], all[i]]; }
-    return all.slice(0, cnt);
-}
-function isPositionForbidden(x, y) { return forbiddenPositions.some(p => Math.abs(p.x - x) < 1 && Math.abs(p.y - y) < 1); }
-function getAvailableBasePositions(layer, existing) {
-    let occupied = new Set();
-    for (let c of existing) if (c.layer === layer) occupied.add(`${c.x},${c.y}`);
-    let all = generateBaseGrid();
-    return all.filter(p => !occupied.has(`${p.x},${p.y}`) && !isPositionForbidden(p.x, p.y));
-}
-function getLevelConfig(level) { return { layers: 5 + (level - 1) * 2, cardsPerLayer: 18 }; }
-function generateLevel(level) {
-    let cfg = getLevelConfig(level);
-    let cards = [], id = 1, layerDirs = [];
-    for (let layer = 0; layer < cfg.layers; layer++) {
-        let avail = getAvailableBasePositions(layer, cards);
-        let toPlace = Math.min(cfg.cardsPerLayer, avail.length);
-        for (let i = avail.length - 1; i > 0; i--) { let j = Math.floor(Math.random() * (i + 1)); [avail[i], avail[j]] = [avail[j], avail[i]]; }
-        let dir = -1;
-        if (layer > 0) {
-            let opts = [0,1,2,3,4,5,6,7];
-            let prev = layerDirs[layer-1];
-            if (prev !== -1) opts = opts.filter(d => d !== prev);
-            if (opts.length === 0) opts = [0,1,2,3,4,5,6,7];
-            dir = opts[Math.floor(Math.random() * opts.length)];
-        }
-        layerDirs.push(dir);
-        for (let i = 0; i < toPlace; i++) {
-            let base = avail[i];
-            let final = { x: base.x, y: base.y };
-            if (layer > 0 && dir !== -1) { let off = getOffsetPositionByDir(base, dir); if (off) final = off; }
-            cards.push({ id: id++, x: final.x, y: final.y, layer: layer });
-        }
-    }
-    let total = cards.length;
-    if (total % 3 !== 0) {
-        let need = 3 - (total % 3);
-        for (let a = 0; a < need; a++) {
-            let added = false;
-            for (let layer = cfg.layers - 1; layer >= 0 && !added; layer--) {
-                let dir = layerDirs[layer];
-                let shuffled = generateBaseGrid();
-                for (let i = shuffled.length - 1; i > 0; i--) { let j = Math.floor(Math.random() * (i + 1)); [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]; }
-                for (let base of shuffled) {
-                    if (isPositionForbidden(base.x, base.y)) continue;
-                    let candidate = { x: base.x, y: base.y };
-                    if (layer > 0 && dir !== -1) { let off = getOffsetPositionByDir(base, dir); if (off) candidate = off; }
-                    let occupied = false;
-                    for (let c of cards) if (c.layer === layer && Math.abs(c.x - candidate.x) < 1 && Math.abs(c.y - candidate.y) < 1) { occupied = true; break; }
-                    if (occupied) continue;
-                    let overlap = false;
-                    for (let c of cards) if (c.layer !== layer) continue;
-                    if (Math.abs(c.x - candidate.x) < CARD_SIZE && Math.abs(c.y - candidate.y) < CARD_SIZE) { overlap = true; break; }
-                    if (!overlap) { cards.push({ id: id++, x: candidate.x, y: candidate.y, layer: layer }); added = true; break; }
-                }
-            }
-        }
-    }
-    return { cards };
-}
-function isRectOverlap(c1, c2) { const h = CARD_SIZE/2; return !(c1.x+h <= c2.x-h || c1.x-h >= c2.x+h || c1.y+h <= c2.y-h || c1.y-h >= c2.y+h); }
-function isCardCovered(card, all) { for (let u of all) if (!u.removed && u.layer > card.layer && isRectOverlap(card, u)) return true; return false; }
-function updateAllClickable() { for (let c of stackCards) if (!c.removed) c.clickable = !isCardCovered(c, stackCards); }
+
 function eliminateFromSlot() {
     let changed = false;
     while (true) {
-        let map = new Map();
-        for (let icon of slotCards) map.set(icon, (map.get(icon) || 0) + 1);
+        let count = new Map();
+        for (let icon of slotCards) count.set(icon, (count.get(icon) || 0) + 1);
         let target = null;
-        for (let [k, v] of map) if (v >= 3) { target = k; break; }
+        for (let [icon, cnt] of count) if (cnt >= 3) { target = icon; break; }
         if (!target) break;
-        let ns = [], removed = 0;
-        for (let icon of slotCards) { if (icon === target && removed < 3) { removed++; continue; } ns.push(icon); }
-        slotCards = ns; score += 10; changed = true;
+        let newSlot = [], removed = 0;
+        for (let icon of slotCards) {
+            if (icon === target && removed < 3) { removed++; continue; }
+            newSlot.push(icon);
+        }
+        slotCards = newSlot;
+        score += 10;
+        changed = true;
     }
-    if (changed) checkGameEnd();
+    if (changed) {
+        checkGameEnd();
+    }
 }
+
 function checkGameEnd() {
     let remaining = stackCards.filter(c => !c.removed).length;
     if (remaining === 0 && slotCards.length === 0 && gameActive) {
         gameActive = false;
-        let prev = levelBestScores[currentLevel-1];
-        if (score > prev) levelBestScores[currentLevel-1] = score;
+        let prevBest = levelBestScores[currentLevel - 1];
+        if (score > prevBest) levelBestScores[currentLevel - 1] = score;
         if (currentLevel < TOTAL_LEVELS) {
-            wx.showModal({ title: `🎉 第${currentLevel}关通关！`, content: `得分：${score}\n最高分：${Math.max(prev, score)}`,
-                confirmText: '下一关', cancelText: '重玩', success: (res) => {
-                    if (res.confirm) { currentLevel++; shuffleRemainingCount = 3; loadLevel(currentLevel); }
-                    else { shuffleRemainingCount = 3; loadLevel(currentLevel); }
+            wx.showModal({
+                title: `🎉 第${currentLevel}關通關！`,
+                content: `本關得分：${score}\n最高分：${Math.max(prevBest, score)}`,
+                confirmText: '下一關',
+                cancelText: '重玩',
+                success: (res) => {
+                    if (res.confirm) { 
+                        currentLevel++; 
+                        shuffleRemainingCount = 3;
+                        loadLevel(currentLevel); 
+                    } else { 
+                        shuffleRemainingCount = 3;
+                        loadLevel(currentLevel); 
+                    }
                 }
             });
         } else {
-            wx.showModal({ title: '🏆 恭喜通关全部关卡！', content: `最终得分：${score}`, showCancel: false,
-                success: () => { currentLevel = 1; shuffleRemainingCount = 3; loadLevel(1); }
+            wx.showModal({
+                title: '🏆 恭喜通關全部關卡！',
+                content: `最終得分：${score}`,
+                showCancel: false,
+                success: () => { 
+                    currentLevel = 1; 
+                    shuffleRemainingCount = 3;
+                    loadLevel(1); 
+                }
             });
         }
         return true;
     }
     if (slotCards.length >= 7 && gameActive) {
-        let cnt = new Map(); for (let icon of slotCards) cnt.set(icon, (cnt.get(icon) || 0) + 1);
-        let can = false; for (let v of cnt.values()) if (v >= 3) { can = true; break; }
+        let can = false;
+        let cnt = new Map();
+        for (let icon of slotCards) cnt.set(icon, (cnt.get(icon) || 0) + 1);
+        for (let v of cnt.values()) if (v >= 3) can = true;
         if (!can) {
             gameActive = false;
-            wx.showModal({ title: '😭 游戏失败', content: `得分：${score}`, confirmText: '重玩', cancelText: '第一关',
-                success: (res) => { if (res.confirm) { shuffleRemainingCount = 3; loadLevel(currentLevel); } else { currentLevel = 1; shuffleRemainingCount = 3; loadLevel(1); } }
+            wx.showModal({
+                title: '😭 遊戲失敗',
+                content: `本關得分：${score}`,
+                confirmText: '重玩',
+                cancelText: '第一關',
+                success: (res) => {
+                    if (res.confirm) {
+                        shuffleRemainingCount = 3;
+                        loadLevel(currentLevel);
+                    } else { 
+                        currentLevel = 1; 
+                        shuffleRemainingCount = 3;
+                        loadLevel(1); 
+                    }
+                }
             });
             return true;
         }
     }
     return false;
 }
-function easeOutCubic(t) { return 1 - Math.pow(1 - t, 3); }
+
+// ==================== 動畫系統 ====================
+function easeOutCubic(t) {
+    return 1 - Math.pow(1 - t, 3);
+}
+
 function startCardAnimation(card, fromX, fromY, toX, toY) {
     playClickSound();
-    card.isAnimating = true; card.animatedRemoved = true;
-    let start = Date.now();
-    activeAnimations.push({ card, fromX, fromY, toX, toY, startTime: start, scaleDuration: 200, flyDuration: 500, phase: 'scale', scale: 1 });
+    
+    card.isAnimating = true;
+    card.animatedRemoved = true;
+    
+    const scaleStartTime = Date.now();
+    const scaleDuration = 200;
+    
+    const animObj = {
+        card: card,
+        fromX: fromX,
+        fromY: fromY,
+        toX: toX,
+        toY: toY,
+        startTime: scaleStartTime,
+        scaleDuration: scaleDuration,
+        flyDuration: 500,
+        phase: 'scale',
+        scale: 1,
+        startScale: 1
+    };
+    
+    activeAnimations.push(animObj);
 }
+
 function updateAnimations() {
-    let now = Date.now();
-    for (let i = activeAnimations.length - 1; i >= 0; i--) {
-        let a = activeAnimations[i];
-        if (a.phase === 'scale') {
-            let elapsed = now - a.startTime;
-            if (elapsed < a.scaleDuration) {
-                let t = elapsed / a.scaleDuration;
-                a.scale = t < 0.5 ? 1 + 0.2 * (t * 2) : 1.1 - 0.1 * ((t - 0.5) * 2);
-            } else { a.phase = 'fly'; a.flyStartTime = now; a.scale = 1; }
-        }
-        if (a.phase === 'fly') {
-            let elapsed = now - a.flyStartTime;
-            if (elapsed < a.flyDuration) {
-                let p = elapsed / a.flyDuration, ep = easeOutCubic(p);
-                a.currentX = a.fromX + (a.toX - a.fromX) * ep;
-                a.currentY = a.fromY + (a.toY - a.fromY) * ep;
-                a.rotation = ep * 0.1;
+    const now = Date.now();
+    const completedAnimations = [];
+    
+    for (let i = 0; i < activeAnimations.length; i++) {
+        const anim = activeAnimations[i];
+        
+        if (anim.phase === 'scale') {
+            const elapsed = now - anim.startTime;
+            if (elapsed < anim.scaleDuration) {
+                let t = elapsed / anim.scaleDuration;
+                if (t < 0.5) {
+                    anim.scale = 1 + 0.2 * (t * 2);
+                } else {
+                    anim.scale = 1.1 - 0.1 * ((t - 0.5) * 2);
+                }
             } else {
-                a.card.removed = true; slotCards.push(a.card.icon);
-                delete a.card.isAnimating; delete a.card.animatedRemoved;
-                activeAnimations.splice(i, 1);
+                anim.phase = 'fly';
+                anim.flyStartTime = now;
+                anim.scale = 1;
+            }
+        }
+        
+        if (anim.phase === 'fly') {
+            const elapsed = now - anim.flyStartTime;
+            if (elapsed < anim.flyDuration) {
+                let progress = elapsed / anim.flyDuration;
+                const easeProgress = easeOutCubic(progress);
+                anim.currentX = anim.fromX + (anim.toX - anim.fromX) * easeProgress;
+                anim.currentY = anim.fromY + (anim.toY - anim.fromY) * easeProgress;
+                anim.rotation = easeProgress * 0.1;
+            } else {
+                completedAnimations.push(i);
+                anim.card.removed = true;
+                slotCards.push(anim.card.icon);
+                delete anim.card.isAnimating;
+                delete anim.card.animatedRemoved;
             }
         }
     }
-    if (activeAnimations.length !== prevAnimLen) { updateAllClickable(); eliminateFromSlot(); prevAnimLen = activeAnimations.length; }
+    
+    for (let i = completedAnimations.length - 1; i >= 0; i--) {
+        activeAnimations.splice(completedAnimations[i], 1);
+    }
+    
+    if (completedAnimations.length > 0) {
+        updateAllCardsClickable();
+        eliminateFromSlot();
+        checkGameEnd();
+    }
 }
+
 function onCardClick(card) {
-    if (!gameActive || !card.clickable || card.isAnimating) return;
-    const slotX = (screenWidth - ui.slot.width) / 2;
-    const slotY = screenHeight - ui.slot.bottom - ui.slot.height;
-    const idx = slotCards.length;
-    const targetX = slotX + 12 + idx * 52 + 4;
+    if (!gameActive || !card.clickable) return;
+    if (card.isAnimating) return;
+    
+    const scaleFactor = CARD_SIZE / BASE_CARD_SIZE;
+    const slotX = (20 + SLOT_X_OFFSET) * scaleFactor;
+    const slotY = (MAX_Y - 40 + SLOT_Y_OFFSET) * scaleFactor;
+    const targetSlotIndex = slotCards.length;
+    const targetX = slotX + 12 + targetSlotIndex * 52;
     const targetY = slotY + 10;
-    const fromX = card.x - CARD_SIZE/2, fromY = card.y - CARD_SIZE/2;
+    
+    const fromX = card.x - CARD_SIZE/2;
+    const fromY = card.y - CARD_SIZE/2;
+    
     startCardAnimation(card, fromX, fromY, targetX, targetY);
 }
+
 function loadLevel(level) {
     currentLevel = level;
     forbiddenPositions = generateForbiddenPositions(level);
+    
+    nextCardId = 1;
     let levelData = generateLevel(level);
     let positions = levelData.cards;
-    let pool = [];
-    for (let i = 0; i < positions.length; i++) {
-        let icon = CARD_KEYS[i % CARD_KEYS.length];
-        for (let j = 0; j < 3 && pool.length < positions.length; j++) pool.push(icon);
-    }
-    while (pool.length < positions.length) pool.push(CARD_KEYS[0]);
-    pool = shuffleArray(pool);
+    let iconPool = generateIconPool(positions.length);
     let newCards = [];
     for (let i = 0; i < positions.length; i++) {
-        newCards.push({ id: nextCardId++, icon: pool[i], x: positions[i].x, y: positions[i].y, layer: positions[i].layer,
-            clickable: true, removed: false, isAnimating: false, animatedRemoved: false });
+        newCards.push({
+            id: nextCardId++,
+            icon: iconPool[i % iconPool.length],
+            x: positions[i].x,
+            y: positions[i].y,
+            layer: positions[i].layer,
+            clickable: true,
+            removed: false,
+            isAnimating: false,
+            animatedRemoved: false
+        });
     }
     stackCards = newCards;
-    updateAllClickable();
+    updateAllCardsClickable();
     slotCards = [];
     score = 0;
     gameActive = true;
     activeAnimations = [];
     shuffleRemainingCount = 3;
+    
     settingsVisible = false;
 }
-function resetGame() { shuffleRemainingCount = 3; loadLevel(currentLevel); }
+
+function resetGame() { 
+    shuffleRemainingCount = 3;
+    loadLevel(currentLevel); 
+}
+
 function shuffleRemaining() {
-    if (!gameActive || shuffleRemainingCount <= 0) { if (shuffleRemainingCount <= 0) wx.showToast({ title: '洗牌次数已用完', icon: 'none' }); return; }
+    if (!gameActive) return;
+    if (shuffleRemainingCount <= 0) {
+        wx.showToast({
+            title: '洗牌次數已用完',
+            icon: 'none',
+            duration: 1000
+        });
+        return;
+    }
+    
     let active = stackCards.filter(c => !c.removed && !c.isAnimating);
     if (active.length === 0) return;
+    
     let icons = active.map(c => c.icon);
-    icons = shuffleArray(icons);
-    active.forEach((c, i) => c.icon = icons[i]);
+    let shuffled = shuffleArray([...icons]);
+    active.forEach((c, idx) => c.icon = shuffled[idx]);
+    
     shuffleRemainingCount--;
-    wx.showToast({ title: `洗牌剩余 ${shuffleRemainingCount} 次`, icon: 'none' });
+    wx.showToast({
+        title: `洗牌剩餘 ${shuffleRemainingCount} 次`,
+        icon: 'none',
+        duration: 1000
+    });
 }
-function toggleSettings() { settingsVisible = !settingsVisible; }
-function selectLevel(lv) { if (lv >= 1 && lv <= TOTAL_LEVELS) loadLevel(lv); settingsVisible = false; }
 
-// ==================== 绘制 ====================
+function toggleSettings() {
+    settingsVisible = !settingsVisible;
+}
+
+function selectLevel(level) {
+    if (level >= 1 && level <= TOTAL_LEVELS) {
+        loadLevel(level);
+    }
+    settingsVisible = false;
+}
+
+// ==================== 繪製 ====================
 function roundRect(ctx, x, y, w, h, r) {
     ctx.beginPath();
     ctx.moveTo(x + r, y);
@@ -432,248 +716,536 @@ function roundRect(ctx, x, y, w, h, r) {
     ctx.quadraticCurveTo(x, y, x + r, y);
     ctx.closePath();
 }
+
 function drawCard(ctx, card, x, y, scale = 1, alpha = 1, isAnimating = false, rotation = 0) {
     const img = loadedImages[card.icon];
     const size = CARD_SIZE * scale;
     const offset = (size - CARD_SIZE) / 2;
+    
     ctx.save();
-    if (rotation) { const cx = x + size/2, cy = y + size/2; ctx.translate(cx, cy); ctx.rotate(rotation); ctx.translate(-cx, -cy); }
-    ctx.shadowColor = 'rgba(0,0,0,0.2)'; ctx.shadowBlur = isAnimating ? 8 : 2;
+    
+    if (rotation > 0) {
+        const centerX = x + size/2;
+        const centerY = y + size/2;
+        ctx.translate(centerX, centerY);
+        ctx.rotate(rotation);
+        ctx.translate(-centerX, -centerY);
+    }
+    
+    if (isAnimating) {
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = 'rgba(0,0,0,0.3)';
+    } else {
+        ctx.shadowColor = 'rgba(0,0,0,0.15)';
+        ctx.shadowBlur = 2;
+    }
     ctx.globalAlpha = alpha;
-    if (img && img.complete) ctx.drawImage(img, x - offset, y - offset, size, size);
-    else { ctx.fillStyle = '#e8d8c0'; ctx.fillRect(x - offset, y - offset, size, size); }
+    
+    if (img && img.complete) {
+        ctx.drawImage(img, x - offset, y - offset, size, size);
+    } else {
+        ctx.fillStyle = '#e8d8c0';
+        ctx.fillRect(x - offset, y - offset, size, size);
+        ctx.font = `${CARD_SIZE * 0.3 * scale}px "Segoe UI"`;
+        ctx.fillStyle = '#5a2f0a';
+        ctx.fillText(card.icon.substring(0, 3), x - offset + 10, y - offset + size - 10);
+    }
+    
     ctx.shadowBlur = 0;
-    if (!card.clickable && !card.removed && !isAnimating) { ctx.fillStyle = 'rgba(120,100,80,0.3)'; roundRect(ctx, x - offset, y - offset, size, size, 8); ctx.fill(); }
+    
+    if (!card.clickable && !card.removed && !isAnimating) {
+        ctx.fillStyle = 'rgba(120, 100, 80, 0.3)';
+        roundRect(ctx, x - offset, y - offset, size, size, 8);
+        ctx.fill();
+    }
+    
     ctx.restore();
 }
+
 function renderUI() {
     ctx.clearRect(0, 0, screenWidth, screenHeight);
+    
     ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, screenWidth, screenHeight);
-    
-    // 标题
-    ctx.font = `bold ${ui.title.fontSize}px "KaiTi", "华文楷书"`;
-    ctx.fillStyle = colors.titleText;
-    ctx.fillText('福了個哥', 20, ui.title.y);
-    
-    // 关卡
-    ctx.font = `bold ${ui.level.fontSize}px "Segoe UI"`;
-    ctx.fillStyle = colors.subtitleText;
-    ctx.fillText(`第 ${currentLevel} / ${TOTAL_LEVELS} 关`, 20, ui.level.y);
-    
-    // 最高分
-    let best = levelBestScores[currentLevel-1];
-    ctx.font = `${ui.best.fontSize}px "Segoe UI"`;
-    ctx.fillStyle = '#b87c3a';
-    ctx.fillText(`🏆 最高 ${best}`, 20, ui.best.y);
-    
-    // 设置按钮
-    ctx.fillStyle = '#ffdd99';
-    roundRect(ctx, ui.settingsBtn.left, ui.settingsBtn.y, ui.settingsBtn.width, ui.settingsBtn.height, 16);
-    ctx.fill();
-    ctx.fillStyle = '#4f2d0a';
-    ctx.font = `bold ${ui.settingsBtn.fontSize}px "Segoe UI"`;
-    ctx.fillText('⚙️', ui.settingsBtn.left + ui.settingsBtn.width/2 - 12, ui.settingsBtn.y + ui.settingsBtn.height/2 + 6);
-    
-    // 分数面板
-    const panelX = screenWidth - ui.scorePanel.right - ui.scorePanel.width;
-    ctx.fillStyle = colors.scoreBg;
-    roundRect(ctx, panelX, ui.scorePanel.y, ui.scorePanel.width, ui.scorePanel.height, 20);
-    ctx.fill();
-    let remain = stackCards.filter(c => !c.removed && !c.isAnimating).length;
-    ctx.font = `bold ${ui.scorePanel.fontSize}px "Segoe UI"`;
-    ctx.fillStyle = colors.scoreText;
-    ctx.fillText(`${score}`, panelX + 12, ui.scorePanel.y + ui.scorePanel.height/2 + 8);
-    ctx.font = `${ui.scorePanel.fontSize * 0.6}px "Segoe UI"`;
-    ctx.fillStyle = colors.remainText;
-    ctx.fillText(`剩${remain}`, panelX + 12, ui.scorePanel.y + ui.scorePanel.height - 8);
-    
-    // 卡牌区域
+
     ctx.save();
     ctx.translate(offsetX, offsetY);
-    let sorted = [...stackCards].sort((a, b) => a.layer - b.layer);
-    for (let c of sorted) if (!c.removed && !c.isAnimating) { let x = c.x - CARD_SIZE/2, y = c.y - CARD_SIZE/2; drawCard(ctx, c, x, y, 1, 1, false, 0); }
-    for (let anim of activeAnimations) {
-        let card = anim.card;
-        let x, y, scale, rot;
-        if (anim.phase === 'scale') { x = anim.fromX; y = anim.fromY; scale = anim.scale; rot = 0; }
-        else { x = anim.currentX; y = anim.currentY; scale = 1; rot = anim.rotation || 0; }
-        drawCard(ctx, card, x, y, scale, 1, true, rot);
-    }
-    ctx.restore();
+    ctx.scale(cardScale, cardScale);
+
+   // 繪製除錯邊界
+    drawDebugBounds(ctx);
+
+    // 動態計算字體大小
+    const titleFontSize = Math.max(24, Math.round(32 * (CARD_SIZE / BASE_CARD_SIZE)));
+    const subtitleFontSize = Math.max(16, Math.round(20 * (CARD_SIZE / BASE_CARD_SIZE)));
+    const infoFontSize = Math.max(12, Math.round(16 * (CARD_SIZE / BASE_CARD_SIZE)));
+    const scoreFontSize = Math.max(18, Math.round(22 * (CARD_SIZE / BASE_CARD_SIZE)));
+
+    // 標題與資訊
+    ctx.font = `bold ${titleFontSize}px "KaiTi", "華文楷書"`;
+    ctx.fillStyle = colors.titleText;
+    ctx.fillText('福了個哥', 25, 55);
+    ctx.font = `bold ${subtitleFontSize}px "Segoe UI"`;
+    ctx.fillStyle = colors.subtitleText;
+    ctx.fillText(`第 ${currentLevel} / ${TOTAL_LEVELS} 關`, 25, 95);
+    let best = levelBestScores[currentLevel - 1];
+    ctx.font = `${infoFontSize}px "Segoe UI"`;
+    ctx.fillStyle = '#b87c3a';
+    ctx.fillText(`🏆 最高 ${best}`, 25, 128);
     
-    // 卡槽
-    const slotX = (screenWidth - ui.slot.width) / 2;
-    const slotY = screenHeight - ui.slot.bottom - ui.slot.height;
+    let remain = stackCards.filter(c => !c.removed && !c.isAnimating).length;
+    ctx.fillStyle = colors.scoreBg;
+    roundRect(ctx, 260, 15, 120, 50, 25);
+    ctx.fill();
+    ctx.font = `bold ${scoreFontSize}px "Segoe UI"`;
+    ctx.fillStyle = colors.scoreText;
+    ctx.fillText(`🐏 ${score}`, 272, 48);
+    ctx.font = `bold ${infoFontSize}px "Segoe UI"`;
+    ctx.fillStyle = colors.remainText;
+    ctx.fillText(`📦 剩餘 ${remain}`, 272, 100);
+
+    // 設定按鈕
+    ctx.fillStyle = '#ffdd99';
+    roundRect(ctx, 25, 140, 80, 35, 18);
+    ctx.fill();
+    ctx.fillStyle = '#4f2d0a';
+    ctx.font = `bold ${infoFontSize}px "Segoe UI"`;
+    ctx.fillText('⚙️ 設定', 35, 163);
+    settingsBtnRect = { x: 25, y: 140, w: 80, h: 35 };
+
+    // 繪製卡牌
+    let sorted = [...stackCards].sort((a, b) => a.layer - b.layer);
+    for (let c of sorted) {
+        if (c.removed) continue;
+        if (c.isAnimating) continue;
+        let x = c.x - CARD_SIZE/2, y = c.y - CARD_SIZE/2;
+        drawCard(ctx, c, x, y, 1, 1, false, 0);
+    }
+    
+    // 繪製卡槽
+    let slotX = 20 + SLOT_X_OFFSET;
+    let slotY = MAX_Y - 40 + SLOT_Y_OFFSET;
+    let slotWidth = 380;
+    let slotHeight = 60;
+    
     ctx.fillStyle = colors.slotBg;
-    roundRect(ctx, slotX, slotY, ui.slot.width, ui.slot.height, 20);
+    roundRect(ctx, slotX, slotY, slotWidth, slotHeight, 28);
     ctx.fill();
     ctx.strokeStyle = '#b9975a';
     ctx.stroke();
-    const cardW = (ui.slot.width - 24) / 7;
+    
+    // 7個槽位卡片
     for (let i = 0; i < 7; i++) {
-        let sx = slotX + 12 + i * (cardW + 4);
+        let sx = slotX + 12 + i * 52;
         if (i < slotCards.length) {
-            const icon = slotCards[i];
-            const img = loadedImages[icon];
+            const iconKey = slotCards[i];
+            const img = loadedImages[iconKey];
             ctx.fillStyle = '#fff3df';
-            roundRect(ctx, sx, slotY + 8, cardW, ui.slot.height - 16, 8);
+            roundRect(ctx, sx, slotY + 8, 48, 44, 12);
             ctx.fill();
-            if (img && img.complete) ctx.drawImage(img, sx + 4, slotY + 10, cardW - 8, ui.slot.height - 24);
-            else { ctx.font = `${cardW * 0.5}px "Segoe UI"`; ctx.fillStyle = '#5a2f0a'; ctx.fillText(icon.substring(0,2), sx+cardW/4, slotY+ui.slot.height/2+5); }
+            
+            if (img && img.complete) {
+                ctx.drawImage(img, sx + 4, slotY + 10, 40, 40);
+            } else {
+                ctx.font = `22px "Segoe UI"`;
+                ctx.fillStyle = '#5a2f0a';
+                ctx.fillText(iconKey.substring(0, 2), sx + 15, slotY + 40);
+            }
         } else {
             ctx.fillStyle = '#eeddbb';
-            roundRect(ctx, sx, slotY + 8, cardW, ui.slot.height - 16, 8);
+            roundRect(ctx, sx, slotY + 8, 48, 44, 12);
             ctx.fill();
-            ctx.font = `${cardW * 0.5}px "Segoe UI"`; ctx.fillStyle = '#bba46c'; ctx.fillText('?', sx+cardW/3, slotY+ui.slot.height/2+5);
+            ctx.font = `22px "Segoe UI"`;
+            ctx.fillStyle = '#bba46c';
+            ctx.fillText('?', sx + 18, slotY + 40);
         }
     }
     
-    // 按钮
-    const btnY = screenHeight - ui.btn.bottom - ui.btn.height;
-    const btnSpacing = (screenWidth - ui.btn.width * 2) / 3;
+    // 繪製動畫中的卡片
+    for (let anim of activeAnimations) {
+        const card = anim.card;
+        let x, y, scale, rotation;
+        if (anim.phase === 'scale') {
+            x = anim.fromX;
+            y = anim.fromY;
+            scale = anim.scale;
+            rotation = 0;
+        } else {
+            x = anim.currentX;
+            y = anim.currentY;
+            scale = 1;
+            rotation = anim.rotation || 0;
+        }
+        drawCard(ctx, card, x, y, scale, 1, true, rotation);
+    }
+
+    // 按鈕
+    let btnY = slotY + 72 + BTN_Y_OFFSET;
+    const buttonFontSize = Math.max(14, Math.round(18 * (CARD_SIZE / BASE_CARD_SIZE)));
+    
     ctx.fillStyle = '#ffdd99';
-    roundRect(ctx, btnSpacing, btnY, ui.btn.width, ui.btn.height, 20);
+    roundRect(ctx, 100, btnY, 95, 42, 35);
     ctx.fill();
     ctx.fillStyle = '#4f2d0a';
-    ctx.font = `bold ${ui.btn.fontSize}px "Segoe UI"`;
-    ctx.fillText('洗牌', btnSpacing + ui.btn.width/2 - 20, btnY + ui.btn.height/2 + 8);
-    ctx.font = `bold ${ui.btn.fontSize * 0.7}px "Segoe UI"`;
+    ctx.font = `bold ${buttonFontSize}px "Segoe UI"`;
+    ctx.fillText('♻️ 洗牌', 115, btnY + 30);
+    ctx.font = `bold ${Math.max(10, Math.round(12 * (CARD_SIZE / BASE_CARD_SIZE)))}px "Segoe UI"`;
     ctx.fillStyle = '#b16224';
-    ctx.fillText(`x${shuffleRemainingCount}`, btnSpacing + ui.btn.width - 18, btnY + ui.btn.height - 8);
+    ctx.fillText(`x${shuffleRemainingCount}`, 178, btnY + 25);
+    shuffleBtnRect = { x: 100, y: btnY, w: 95, h: 42 };
     
     ctx.fillStyle = '#ffdd99';
-    roundRect(ctx, btnSpacing * 2 + ui.btn.width, btnY, ui.btn.width, ui.btn.height, 20);
+    roundRect(ctx, 215, btnY, 95, 42, 35);
     ctx.fill();
     ctx.fillStyle = '#4f2d0a';
-    ctx.font = `bold ${ui.btn.fontSize}px "Segoe UI"`;
-    ctx.fillText('重来', btnSpacing * 2 + ui.btn.width + ui.btn.width/2 - 20, btnY + ui.btn.height/2 + 8);
-    
-    // 缓存按钮位置供触摸事件
-    window.shuffleBtnRect = { x: btnSpacing, y: btnY, w: ui.btn.width, h: ui.btn.height };
-    window.resetBtnRect = { x: btnSpacing * 2 + ui.btn.width, y: btnY, w: ui.btn.width, h: ui.btn.height };
-    window.settingsBtnRect = { x: ui.settingsBtn.left, y: ui.settingsBtn.y, w: ui.settingsBtn.width, h: ui.settingsBtn.height };
-    
-    // 设置面板（弹窗）
+    ctx.font = `bold ${buttonFontSize}px "Segoe UI"`;
+    ctx.fillText('🔄 重來', 230, btnY + 30);
+    resetBtnRect = { x: 215, y: btnY, w: 95, h: 42 };
+
+    ctx.restore();
+
+    // 繪製設定面板
     if (settingsVisible) {
         ctx.fillStyle = 'rgba(0,0,0,0.7)';
         ctx.fillRect(0, 0, screenWidth, screenHeight);
-        const px = (screenWidth - ui.panel.width) / 2;
-        const py = (screenHeight - ui.panel.height) / 2;
+        
+        const panelWidth = Math.min(280, screenWidth * 0.8);
+        const panelHeight = Math.min(320, screenHeight * 0.6);
+        const panelX = (screenWidth - panelWidth) / 2;
+        const panelY = (screenHeight - panelHeight) / 2;
+        
         ctx.fillStyle = colors.settingsPanel;
-        roundRect(ctx, px, py, ui.panel.width, ui.panel.height, 20);
+        roundRect(ctx, panelX, panelY, panelWidth, panelHeight, 20);
         ctx.fill();
+        
+        const panelTitleSize = Math.min(22, Math.round(panelWidth * 0.08));
         ctx.fillStyle = '#5a3c1a';
-        ctx.font = `bold ${ui.title.fontSize * 0.7}px "KaiTi"`;
-        ctx.fillText('设置', px + ui.panel.width/2 - 30, py + 40);
-        ctx.beginPath(); ctx.moveTo(px + 20, py + 55); ctx.lineTo(px + ui.panel.width - 20, py + 55); ctx.stroke();
+        ctx.font = `bold ${panelTitleSize}px "KaiTi"`;
+        ctx.fillText('設定', panelX + panelWidth * 0.4, panelY + panelHeight * 0.12);
         
-        // 背景音乐
+        // 分隔線
+        ctx.strokeStyle = '#d4c4a0';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(panelX + 20, panelY + panelHeight * 0.17);
+        ctx.lineTo(panelX + panelWidth - 20, panelY + panelHeight * 0.17);
+        ctx.stroke();
+        
+        const itemFontSize = Math.min(16, Math.round(panelWidth * 0.057));
+        
+        // 背景音樂開關
         ctx.fillStyle = bgmEnabled ? '#2f6b2f' : '#aa5440';
-        roundRect(ctx, px + ui.panel.width - 80, py + 75, 60, 30, 15);
+        roundRect(ctx, panelX + panelWidth * 0.72, panelY + panelHeight * 0.24, panelWidth * 0.2, panelHeight * 0.09, 15);
         ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 14px "Segoe UI"'; ctx.fillText(bgmEnabled ? 'ON' : 'OFF', px + ui.panel.width - 68, py + 96);
-        ctx.fillStyle = '#4a2e0a'; ctx.font = '16px "Segoe UI"'; ctx.fillText('背景音乐', px + 30, py + 96);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.min(14, Math.round(panelWidth * 0.05))}px "Segoe UI"`;
+        ctx.fillText(bgmEnabled ? 'ON' : 'OFF', panelX + panelWidth * 0.77, panelY + panelHeight * 0.3);
+        ctx.fillStyle = '#4a2e0a';
+        ctx.font = `${itemFontSize}px "Segoe UI"`;
+        ctx.fillText('背景音樂', panelX + panelWidth * 0.1, panelY + panelHeight * 0.3);
         
-        // 切换 BGM
+        // 切換背景音樂按鈕
         ctx.fillStyle = '#c28a4e';
-        roundRect(ctx, px + ui.panel.width - 80, py + 115, 60, 30, 15);
+        roundRect(ctx, panelX + panelWidth * 0.72, panelY + panelHeight * 0.35, panelWidth * 0.2, panelHeight * 0.09, 15);
         ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.fillText(`${currentBgmIndex}`, px + ui.panel.width - 58, py + 136);
-        ctx.fillStyle = '#4a2e0a'; ctx.fillText('切换BGM', px + 30, py + 136);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.min(14, Math.round(panelWidth * 0.05))}px "Segoe UI"`;
+        ctx.fillText(`${currentBgmIndex}`, panelX + panelWidth * 0.8, panelY + panelHeight * 0.41);
+        ctx.fillStyle = '#4a2e0a';
+        ctx.font = `${itemFontSize}px "Segoe UI"`;
+        ctx.fillText('切換BGM', panelX + panelWidth * 0.1, panelY + panelHeight * 0.41);
         
-        // 点击音效
+        // 點擊音效開關
         ctx.fillStyle = sfxEnabled ? '#2f6b2f' : '#aa5440';
-        roundRect(ctx, px + ui.panel.width - 80, py + 155, 60, 30, 15);
+        roundRect(ctx, panelX + panelWidth * 0.72, panelY + panelHeight * 0.46, panelWidth * 0.2, panelHeight * 0.09, 15);
         ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.fillText(sfxEnabled ? 'ON' : 'OFF', px + ui.panel.width - 68, py + 176);
-        ctx.fillStyle = '#4a2e0a'; ctx.fillText('点击音效', px + 30, py + 176);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.min(14, Math.round(panelWidth * 0.05))}px "Segoe UI"`;
+        ctx.fillText(sfxEnabled ? 'ON' : 'OFF', panelX + panelWidth * 0.77, panelY + panelHeight * 0.52);
+        ctx.fillStyle = '#4a2e0a';
+        ctx.font = `${itemFontSize}px "Segoe UI"`;
+        ctx.fillText('點擊音效', panelX + panelWidth * 0.1, panelY + panelHeight * 0.52);
         
-        ctx.beginPath(); ctx.moveTo(px + 20, py + 200); ctx.lineTo(px + ui.panel.width - 20, py + 200); ctx.stroke();
-        ctx.fillStyle = '#4a2e0a'; ctx.font = 'bold 16px "Segoe UI"'; ctx.fillText('切换关卡', px + 30, py + 235);
-        const btnW = 45, btnH = 30, startX = px + (ui.panel.width - 5 * btnW - 4 * 10) / 2;
+        // 分隔線
+        ctx.beginPath();
+        ctx.moveTo(panelX + 20, panelY + panelHeight * 0.62);
+        ctx.lineTo(panelX + panelWidth - 20, panelY + panelHeight * 0.62);
+        ctx.stroke();
+        
+        // 關卡選擇標籤
+        ctx.fillStyle = '#4a2e0a';
+        ctx.font = `bold ${itemFontSize}px "Segoe UI"`;
+        ctx.fillText('切換關卡', panelX + panelWidth * 0.1, panelY + panelHeight * 0.72);
+        
+        // 關卡按鈕行1 (1-5)
+        const levelBtnWidth = Math.min(45, (panelWidth - 40) / 5.5);
+        const levelBtnHeight = Math.min(30, panelHeight * 0.1);
         for (let i = 0; i < 5; i++) {
-            let lvl = i + 1;
-            let bx = startX + i * (btnW + 10);
-            let isCur = (lvl === currentLevel);
-            ctx.fillStyle = isCur ? '#2f6b2f' : '#ffdd99';
-            roundRect(ctx, bx, py + 250, btnW, btnH, 10);
+            const levelNum = i + 1;
+            const btnX = panelX + 20 + i * (levelBtnWidth + 5);
+            const btnY = panelY + panelHeight * 0.78;
+            const isCurrent = (levelNum === currentLevel);
+            ctx.fillStyle = isCurrent ? '#2f6b2f' : '#ffdd99';
+            roundRect(ctx, btnX, btnY, levelBtnWidth, levelBtnHeight, 12);
             ctx.fill();
-            ctx.fillStyle = isCur ? '#fff' : '#4f2d0a';
-            ctx.font = 'bold 14px "Segoe UI"';
-            ctx.fillText(`${lvl}`, bx + 16, py + 271);
-            if (!window.lv1) window.lv1 = [];
-            window.lv1[i] = { x: bx, y: py + 250, w: btnW, h: btnH, level: lvl };
+            ctx.fillStyle = isCurrent ? '#ffffff' : '#4f2d0a';
+            ctx.font = `bold ${Math.min(14, Math.round(levelBtnHeight * 0.5))}px "Segoe UI"`;
+            ctx.fillText(`${levelNum}`, btnX + levelBtnWidth * 0.35, btnY + levelBtnHeight * 0.7);
+            if (!window.levelButtons1) window.levelButtons1 = [];
+            window.levelButtons1[i] = { x: btnX, y: btnY, w: levelBtnWidth, h: levelBtnHeight, level: levelNum };
         }
+        
+        // 關卡按鈕行2 (6-10)
         for (let i = 0; i < 5; i++) {
-            let lvl = i + 6;
-            let bx = startX + i * (btnW + 10);
-            let isCur = (lvl === currentLevel);
-            ctx.fillStyle = isCur ? '#2f6b2f' : '#ffdd99';
-            roundRect(ctx, bx, py + 285, btnW, btnH, 10);
+            const levelNum = i + 6;
+            const btnX = panelX + 20 + i * (levelBtnWidth + 5);
+            const btnY = panelY + panelHeight * 0.89;
+            const isCurrent = (levelNum === currentLevel);
+            ctx.fillStyle = isCurrent ? '#2f6b2f' : '#ffdd99';
+            roundRect(ctx, btnX, btnY, levelBtnWidth, levelBtnHeight, 12);
             ctx.fill();
-            ctx.fillStyle = isCur ? '#fff' : '#4f2d0a';
-            ctx.font = 'bold 14px "Segoe UI"';
-            ctx.fillText(`${lvl}`, bx + 16, py + 306);
-            if (!window.lv2) window.lv2 = [];
-            window.lv2[i] = { x: bx, y: py + 285, w: btnW, h: btnH, level: lvl };
+            ctx.fillStyle = isCurrent ? '#ffffff' : '#4f2d0a';
+            ctx.font = `bold ${Math.min(14, Math.round(levelBtnHeight * 0.5))}px "Segoe UI"`;
+            ctx.fillText(`${levelNum}`, btnX + levelBtnWidth * 0.35, btnY + levelBtnHeight * 0.7);
+            if (!window.levelButtons2) window.levelButtons2 = [];
+            window.levelButtons2[i] = { x: btnX, y: btnY, w: levelBtnWidth, h: levelBtnHeight, level: levelNum };
         }
+        
+        // 關閉按鈕
         ctx.fillStyle = '#aa5440';
-        roundRect(ctx, px + ui.panel.width - 45, py + 10, 30, 30, 15);
+        const closeBtnSize = Math.min(30, panelWidth * 0.1);
+        roundRect(ctx, panelX + panelWidth - closeBtnSize - 10, panelY + 10, closeBtnSize, closeBtnSize, closeBtnSize/2);
         ctx.fill();
-        ctx.fillStyle = '#fff'; ctx.font = 'bold 20px "Segoe UI"'; ctx.fillText('✕', px + ui.panel.width - 33, py + 33);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = `bold ${Math.min(20, Math.round(closeBtnSize * 0.7))}px "Segoe UI"`;
+        ctx.fillText('✕', panelX + panelWidth - closeBtnSize, panelY + closeBtnSize * 0.8);
     }
-    
+
     if (!gameActive) {
-        ctx.fillStyle = 'rgba(0,0,0,0.6)'; ctx.fillRect(0, 0, screenWidth, screenHeight);
-        ctx.font = `bold ${ui.title.fontSize}px "Segoe UI"`; ctx.fillStyle = '#fff';
-        ctx.fillText('游戏结束', screenWidth/2 - 80, screenHeight/2);
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(0, 0, screenWidth, screenHeight);
+        ctx.font = 'bold 40px "Segoe UI"';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('遊戲結束', screenWidth/2 - 100, screenHeight/2);
     }
 }
 
-// ==================== 触摸事件 ====================
+// ==================== 觸摸事件 ====================
 function onTouchStart(e) {
-    let t = e.touches[0], x = t.clientX, y = t.clientY;
+    let t = e.touches[0];
+    let x = (t.clientX - offsetX) / cardScale;
+    let y = (t.clientY - offsetY) / cardScale;
+    
+    // 檢查設定面板內的點擊
     if (settingsVisible) {
-        const pw = ui.panel.width, ph = ui.panel.height;
-        const px = (screenWidth - pw) / 2, py = (screenHeight - ph) / 2;
-        if (x >= px + pw - 45 && x <= px + pw - 15 && y >= py + 10 && y <= py + 40) { settingsVisible = false; return; }
-        if (x >= px + pw - 80 && x <= px + pw - 20 && y >= py + 75 && y <= py + 105) { toggleBgm(); return; }
-        if (x >= px + pw - 80 && x <= px + pw - 20 && y >= py + 115 && y <= py + 145) { switchBgm(); return; }
-        if (x >= px + pw - 80 && x <= px + pw - 20 && y >= py + 155 && y <= py + 185) { toggleSfx(); return; }
-        if (window.lv1) for (let btn of window.lv1) if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) { selectLevel(btn.level); return; }
-        if (window.lv2) for (let btn of window.lv2) if (x >= btn.x && x <= btn.x + btn.w && y >= btn.y && y <= btn.y + btn.h) { selectLevel(btn.level); return; }
+        const panelWidth = Math.min(280, screenWidth * 0.8);
+        const panelHeight = Math.min(320, screenHeight * 0.6);
+        const panelX = (screenWidth - panelWidth) / 2;
+        const panelY = (screenHeight - panelHeight) / 2;
+        
+        // 關閉按鈕
+        const closeBtnSize = Math.min(30, panelWidth * 0.1);
+        const closeX = panelX + panelWidth - closeBtnSize - 10;
+        const closeY = panelY + 10;
+        if (x * cardScale + offsetX >= closeX && x * cardScale + offsetX <= closeX + closeBtnSize &&
+            y * cardScale + offsetY >= closeY && y * cardScale + offsetY <= closeY + closeBtnSize) {
+            settingsVisible = false;
+            return;
+        }
+        
+        // 背景音樂開關按鈕
+        const bgmBtnX = panelX + panelWidth * 0.72;
+        const bgmBtnY = panelY + panelHeight * 0.24;
+        const bgmBtnW = panelWidth * 0.2;
+        const bgmBtnH = panelHeight * 0.09;
+        if (x * cardScale + offsetX >= bgmBtnX && x * cardScale + offsetX <= bgmBtnX + bgmBtnW &&
+            y * cardScale + offsetY >= bgmBtnY && y * cardScale + offsetY <= bgmBtnY + bgmBtnH) {
+            toggleBgm();
+            return;
+        }
+        
+        // 切換BGM按鈕
+        const switchBgmX = panelX + panelWidth * 0.72;
+        const switchBgmY = panelY + panelHeight * 0.35;
+        if (x * cardScale + offsetX >= switchBgmX && x * cardScale + offsetX <= switchBgmX + bgmBtnW &&
+            y * cardScale + offsetY >= switchBgmY && y * cardScale + offsetY <= switchBgmY + bgmBtnH) {
+            switchBgm();
+            return;
+        }
+        
+        // 點擊音效開關按鈕
+        const sfxBtnX = panelX + panelWidth * 0.72;
+        const sfxBtnY = panelY + panelHeight * 0.46;
+        if (x * cardScale + offsetX >= sfxBtnX && x * cardScale + offsetX <= sfxBtnX + bgmBtnW &&
+            y * cardScale + offsetY >= sfxBtnY && y * cardScale + offsetY <= sfxBtnY + bgmBtnH) {
+            toggleSfx();
+            return;
+        }
+        
+        // 關卡按鈕行1
+        if (window.levelButtons1) {
+            for (let btn of window.levelButtons1) {
+                if (x * cardScale + offsetX >= btn.x && x * cardScale + offsetX <= btn.x + btn.w &&
+                    y * cardScale + offsetY >= btn.y && y * cardScale + offsetY <= btn.y + btn.h) {
+                    selectLevel(btn.level);
+                    return;
+                }
+            }
+        }
+        
+        // 關卡按鈕行2
+        if (window.levelButtons2) {
+            for (let btn of window.levelButtons2) {
+                if (x * cardScale + offsetX >= btn.x && x * cardScale + offsetX <= btn.x + btn.w &&
+                    y * cardScale + offsetY >= btn.y && y * cardScale + offsetY <= btn.y + btn.h) {
+                    selectLevel(btn.level);
+                    return;
+                }
+            }
+        }
         return;
     }
-    if (x >= window.settingsBtnRect.x && x <= window.settingsBtnRect.x + window.settingsBtnRect.w && y >= window.settingsBtnRect.y && y <= window.settingsBtnRect.y + window.settingsBtnRect.h) { toggleSettings(); return; }
+    
+    // 檢查設定按鈕
+    if (x >= settingsBtnRect.x && x <= settingsBtnRect.x + settingsBtnRect.w &&
+        y >= settingsBtnRect.y && y <= settingsBtnRect.y + settingsBtnRect.h) {
+        toggleSettings();
+        return;
+    }
+    
     if (!gameActive) return;
-    let cardX = x - offsetX, cardY = y - offsetY;
+    
     let sorted = [...stackCards].filter(c => !c.removed && !c.isAnimating).sort((a, b) => b.layer - a.layer);
     for (let card of sorted) {
-        let left = card.x - CARD_SIZE/2, right = card.x + CARD_SIZE/2, top = card.y - CARD_SIZE/2, bottom = card.y + CARD_SIZE/2;
-        if (cardX >= left && cardX <= right && cardY >= top && cardY <= bottom) { if (card.clickable) onCardClick(card); break; }
+        let left = card.x - CARD_SIZE/2, right = card.x + CARD_SIZE/2;
+        let top = card.y - CARD_SIZE/2, bottom = card.y + CARD_SIZE/2;
+        if (x >= left && x <= right && y >= top && y <= bottom) {
+            if (card.clickable) onCardClick(card);
+            break;
+        }
     }
 }
+
 function onTouchEnd(e) {
+    let t = e.changedTouches[0];
+    let x = (t.clientX - offsetX) / cardScale;
+    let y = (t.clientY - offsetY) / cardScale;
+    
     if (settingsVisible) return;
-    let t = e.changedTouches[0], x = t.clientX, y = t.clientY;
-    if (x >= window.shuffleBtnRect.x && x <= window.shuffleBtnRect.x + window.shuffleBtnRect.w && y >= window.shuffleBtnRect.y && y <= window.shuffleBtnRect.y + window.shuffleBtnRect.h) shuffleRemaining();
-    if (x >= window.resetBtnRect.x && x <= window.resetBtnRect.x + window.resetBtnRect.w && y >= window.resetBtnRect.y && y <= window.resetBtnRect.y + window.resetBtnRect.h) resetGame();
+    
+    if (x >= shuffleBtnRect.x && x <= shuffleBtnRect.x + shuffleBtnRect.w &&
+        y >= shuffleBtnRect.y && y <= shuffleBtnRect.y + shuffleBtnRect.h) {
+        shuffleRemaining();
+    }
+    if (x >= resetBtnRect.x && x <= resetBtnRect.x + resetBtnRect.w &&
+        y >= resetBtnRect.y && y <= resetBtnRect.y + resetBtnRect.h) {
+        resetGame();
+    }
 }
 
 // ==================== 初始化 ====================
-async function init() {
-    canvas = wx.createCanvas(); ctx = canvas.getContext('2d');
-    let sys = wx.getSystemInfoSync();
-    screenWidth = sys.screenWidth; screenHeight = sys.screenHeight;
-    canvas.width = screenWidth; canvas.height = screenHeight;
-    updateLayout();
+function init() {
+    
+    canvas = wx.createCanvas();
+    ctx = canvas.getContext('2d');
+    let sys = wx.getWindowInfo();
+    screenWidth = sys.screenWidth;
+    screenHeight = sys.screenHeight;
+    canvas.width = screenWidth;
+    canvas.height = screenHeight;
+
+    // 計算動態尺寸
+    calculateDynamicSizes();
+
+    BASE_MIN_X = PAD_LEFT + GRID_STEP / 2;
+    BASE_MIN_Y = PAD_TOP + GRID_STEP / 2;
+    BASE_MAX_X = BASE_MIN_X + (COLS - 1) * GRID_STEP;
+    BASE_MAX_Y = BASE_MIN_Y + (ROWS - 1) * GRID_STEP;
+    
+    MIN_X = BASE_MIN_X - CARD_SIZE;
+    MAX_X = BASE_MAX_X + CARD_SIZE;
+    MIN_Y = PAD_TOP;
+    MAX_Y = BASE_MAX_Y + CARD_SIZE + 100;
+    console.log(`邏輯坐標範圍: X(${MIN_X} ~ ${MAX_X}), Y(${MIN_Y} ~ ${MAX_Y})`);
+    BASE_POSITIONS = generateBaseGrid();
+    
+    // 自動計算縮放比例以適應螢幕
+    let logicWidth = MAX_X - MIN_X + 200;
+    let logicHeight = MAX_Y + 120;
+    let scaleX = screenWidth / logicWidth;
+    let scaleY = screenHeight / logicHeight;
+    cardScale = Math.min(scaleX, scaleY) * 0.92;
+    offsetX = (screenWidth - logicWidth * cardScale) / 2;
+    offsetY = (screenHeight - logicHeight * cardScale) / 2;
+
+    // 詳細輸出系統資訊
+    console.log("========== 系統詳細資訊 ==========");
+    console.log(`screenWidth: ${sys.screenWidth}px`);
+    console.log(`screenHeight: ${sys.screenHeight}px`);
+    console.log(`windowWidth: ${sys.windowWidth}px`);
+    console.log(`windowHeight: ${sys.windowHeight}px`);
+    console.log(`pixelRatio: ${sys.pixelRatio}`);
+    console.log(`statusBarHeight: ${sys.statusBarHeight}px`);
+    console.log(`safeArea:`, sys.safeArea);
+    console.log("==================================");
+
     initAudio();
-    await loadCardImages();
-    loadLevel(1);
+    
+    loadCardImages().then(() => {
+        loadLevel(1);
+    });
+    
     wx.onTouchStart(onTouchStart);
     wx.onTouchEnd(onTouchEnd);
-    function frame() { updateAnimations(); renderUI(); requestAnimationFrame(frame); }
+
+    function frame() {
+        updateAnimations();
+        renderUI();
+        requestAnimationFrame(frame);
+    }
     frame();
+}
+function drawDebugBounds(ctx) {
+    // BASE 範圍（基礎網格邊界）- 藍色虛線框
+    ctx.strokeStyle = 'rgba(0, 100, 255, 0.6)';
+    ctx.lineWidth = 1.5 / cardScale;
+    ctx.setLineDash([8, 4]);
+    
+    const baseLeft = BASE_MIN_X - CARD_SIZE/2;
+    const baseTop = BASE_MIN_Y - CARD_SIZE/2;
+    const baseWidth = BASE_MAX_X - BASE_MIN_X + CARD_SIZE;
+    const baseHeight = BASE_MAX_Y - BASE_MIN_Y + CARD_SIZE;
+    
+    ctx.strokeRect(baseLeft, baseTop, baseWidth, baseHeight);
+    
+    // 添加標籤
+    ctx.fillStyle = 'rgba(0, 100, 255, 0.8)';
+    ctx.font = `bold ${11 / cardScale}px "Segoe UI"`;
+    ctx.fillText('BASE', baseLeft + 5, baseTop - 5);
+    
+    // MIN/MAX 範圍（擴展邊界）- 紅色實線框
+    ctx.strokeStyle = 'rgba(255, 50, 50, 0.6)';
+    ctx.lineWidth = 2 / cardScale;
+    ctx.setLineDash([]);
+    ctx.strokeRect(MIN_X, MIN_Y, MAX_X - MIN_X, MAX_Y - MIN_Y);
+    
+    // 添加標籤和坐標
+    ctx.fillStyle = 'rgba(255, 50, 50, 0.8)';
+    ctx.fillText('MIN/MAX', MIN_X + 5, MIN_Y - 5);
+    
+    // 四角坐標標註
+    const fontSize = `${10 / cardScale}px "Segoe UI"`;
+    ctx.font = fontSize;
+    
+    // 左上角
+    ctx.fillText(`(${MIN_X.toFixed(0)},${MIN_Y.toFixed(0)})`, MIN_X + 5, MIN_Y + 15);
+    // 右上角
+    ctx.fillText(`(${MAX_X.toFixed(0)},${MIN_Y.toFixed(0)})`, MAX_X - 70, MIN_Y + 15);
+    // 左下角
+    ctx.fillText(`(${MIN_X.toFixed(0)},${MAX_Y.toFixed(0)})`, MIN_X + 5, MAX_Y - 5);
+    // 右下角
+    ctx.fillText(`(${MAX_X.toFixed(0)},${MAX_Y.toFixed(0)})`, MAX_X - 70, MAX_Y - 5);
+
+    ctx.fillText(`CARD_SIZE: ${CARD_SIZE}px`, 500,500);
 }
 init();
