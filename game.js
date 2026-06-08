@@ -2,8 +2,8 @@
 
 // ==================== 可調整參數（基礎值，會根據螢幕大小自動調整） ====================
 const BASE_CARD_SIZE = 65;
-const COLS = 5;
-const ROWS = 8;
+const COLS = 6;
+const ROWS = 7;
 
 // ==================== 音效配置 ====================
 const CLICK_SOUND_URL = 'images/click.mp3';
@@ -43,7 +43,7 @@ function calculateDynamicSizes() {
     GRID_STEP = CARD_SIZE;
     HALF_SHIFT = CARD_SIZE / 2;
     
-    PAD_LEFT = Math.round(20 * scaleFactor);
+    PAD_LEFT = Math.round(30 * scaleFactor);
     PAD_TOP = Math.round(170 * scaleFactor);
     
     SLOT_X_OFFSET = Math.round(-20 * scaleFactor);
@@ -616,11 +616,12 @@ function onCardClick(card) {
     
     const scaleFactor = CARD_SIZE / BASE_CARD_SIZE;
     const slotX = (20 + SLOT_X_OFFSET) * scaleFactor;
-    const slotY = (MAX_Y - 40 + SLOT_Y_OFFSET) * scaleFactor;
+    const slotY = MAX_Y - 60;
+    
     const targetSlotIndex = slotCards.length;
     const targetX = slotX + 12 + targetSlotIndex * 52;
-    const targetY = slotY + 10;
-    
+    const targetY = slotY;
+    console.log("slotY="+slotY+" , targetY="+targetY + " , MAX_Y="+MAX_Y+" , SLOT_Y_OFFSET="+SLOT_Y_OFFSET + " , scaleFactor="+scaleFactor);
     const fromX = card.x - CARD_SIZE/2;
     const fromY = card.y - CARD_SIZE/2;
     
@@ -1147,18 +1148,26 @@ function onTouchEnd(e) {
 function init() {
     
     canvas = wx.createCanvas();
-    ctx = canvas.getContext('2d');
+   
     let sys = wx.getWindowInfo();
     screenWidth = sys.screenWidth;
     screenHeight = sys.screenHeight;
     canvas.width = screenWidth;
     canvas.height = screenHeight;
+    ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#ff0000';
+    ctx.fillRect(0, 0, screenWidth, screenHeight);
+    
+    // 在控制台输出尺寸信息
+    console.log(`画布尺寸: ${canvas.width} x ${canvas.height}`);
+    console.log(`窗口信息: 宽=${screenWidth}, 高=${screenHeight}`);
 
     // 計算動態尺寸
     calculateDynamicSizes();
 
     BASE_MIN_X = PAD_LEFT + GRID_STEP / 2;
-    BASE_MIN_Y = PAD_TOP + GRID_STEP / 2;
+    BASE_MIN_Y = PAD_TOP + GRID_STEP ;
     BASE_MAX_X = BASE_MIN_X + (COLS - 1) * GRID_STEP;
     BASE_MAX_Y = BASE_MIN_Y + (ROWS - 1) * GRID_STEP;
     
@@ -1170,8 +1179,8 @@ function init() {
     BASE_POSITIONS = generateBaseGrid();
     
     // 自動計算縮放比例以適應螢幕
-    let logicWidth = MAX_X - MIN_X + 200;
-    let logicHeight = MAX_Y + 120;
+    let logicWidth = MAX_X - MIN_X ;
+    let logicHeight = MAX_Y ;
     let scaleX = screenWidth / logicWidth;
     let scaleY = screenHeight / logicHeight;
     cardScale = Math.min(scaleX, scaleY) * 0.92;
@@ -1204,7 +1213,8 @@ function init() {
         requestAnimationFrame(frame);
     }
     frame();
-}
+
+    }
 function drawDebugBounds(ctx) {
     // BASE 範圍（基礎網格邊界）- 藍色虛線框
     ctx.strokeStyle = 'rgba(0, 100, 255, 0.6)';
