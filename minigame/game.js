@@ -1,5 +1,3 @@
-// game.js - 福一下哥（響應式完整版，分數跨關累加，無最高分記錄）
-
 // ==================== 可調整參數（基礎值，會根據螢幕大小自動調整） ====================
 const BASE_CARD_SIZE = 65;
 const COLS = 6;
@@ -31,9 +29,20 @@ let CARD_SIZE, GRID_STEP, HALF_SHIFT;
 let PAD_LEFT, PAD_TOP;
 let SLOT_X_OFFSET, SLOT_Y_OFFSET, BTN_Y_OFFSET;
 
-// ==================== 累積總分（跨關卡） ====================
-let totalScore = 0;           // 總累積分數（所有關卡累加）
+// ✅ 新增：UI 元素的動態變數
+let TITLE_WIDTH, TITLE_HEIGHT, TITLE_X, TITLE_Y;
+let COIN_WIDTH, COIN_HEIGHT, COIN_X, COIN_Y;
+let SCORE_BG_WIDTH, SCORE_BG_HEIGHT, SCORE_BG_X, SCORE_BG_Y;
+let SCORE_FONT_SIZE, SCORE_TEXT_X, SCORE_TEXT_Y;
+let INFO_FONT_SIZE;
+let REMAIN_TEXT_X, REMAIN_TEXT_Y;
 
+// ✅ 新增：關卡按鈕數組
+let levelButtons1 = [];
+let levelButtons2 = [];
+
+// ==================== 累積總分（跨關卡） ====================
+let totalScore = 0;
 function calculateDynamicSizes() {
     const sys = wx.getSystemInfoSync();
     const screenWidth = sys.screenWidth;
@@ -53,58 +62,51 @@ function calculateDynamicSizes() {
     SLOT_Y_OFFSET = Math.round(-40 * scaleFactor);
     BTN_Y_OFFSET = 0;
 
-    // === 新增：標題圖片動態尺寸 ===
-    // 基礎值（以 375 螢幕寬度為基準）
+    // === 標題圖片動態尺寸 ===
     const BASE_TITLE_WIDTH = 528;
     const BASE_TITLE_HEIGHT = 200;
     const BASE_TITLE_X = 20;
     const BASE_TITLE_Y = 40;
 
-    // 儲存到全域變數
-    window.TITLE_WIDTH = Math.round(BASE_TITLE_WIDTH * scaleFactor / 3);
-    window.TITLE_HEIGHT = Math.round(BASE_TITLE_HEIGHT * scaleFactor / 3);
-    window.TITLE_X = Math.round(BASE_TITLE_X * scaleFactor);
-    window.TITLE_Y = Math.round(BASE_TITLE_Y * scaleFactor);
+    // ❌ 删除 const，改为全局变量（不加任何关键字）
+    TITLE_WIDTH = Math.round(BASE_TITLE_WIDTH * scaleFactor / 3);
+    TITLE_HEIGHT = Math.round(BASE_TITLE_HEIGHT * scaleFactor / 3);
+    TITLE_X = Math.round(BASE_TITLE_X * scaleFactor);
+    TITLE_Y = Math.round(BASE_TITLE_Y * scaleFactor);
 
-    // === 金幣圖片動態尺寸與位置（右上角）===
+    // === 金幣圖片動態尺寸與位置 ===
     const BASE_COIN_WIDTH = 100;
     const BASE_COIN_HEIGHT = 127;
-    const coinScale = scaleFactor * 0.45; // 縮小比例，避免太大
+    const coinScale = scaleFactor * 0.45;
 
-    window.COIN_WIDTH = Math.round(BASE_COIN_WIDTH * coinScale);
-    window.COIN_HEIGHT = Math.round(BASE_COIN_HEIGHT * coinScale);
+    COIN_WIDTH = Math.round(BASE_COIN_WIDTH * coinScale);
+    COIN_HEIGHT = Math.round(BASE_COIN_HEIGHT * coinScale);
 
     // 獲取膠囊按鈕位置資訊
     const menuButtonInfo = wx.getMenuButtonBoundingClientRect();
-    const menuButtonRight = menuButtonInfo.right; // 膠囊右邊緣位置
-    const menuButtonBottom = menuButtonInfo.bottom; // 膠囊底部位置
-    const menuButtonTop = menuButtonInfo.top; // 膠囊頂部位置
+    const menuButtonRight = menuButtonInfo.right;
+    const menuButtonBottom = menuButtonInfo.bottom;
 
-    // 計算右上角區域的起點（膠囊下方 15px）
-    const rightEdge = screenWidth - 20; // 右邊距 20px
-    const topBase = menuButtonBottom + 15; // 膠囊下方 15px
+    const rightEdge = screenWidth - 20;
+    const topBase = menuButtonBottom + 15;
 
-    // 分數背景框的尺寸
-    window.SCORE_BG_WIDTH = Math.round(140 * scaleFactor);
-    window.SCORE_BG_HEIGHT = Math.round(40 * scaleFactor);
+    SCORE_BG_WIDTH = Math.round(140 * scaleFactor);
+    SCORE_BG_HEIGHT = Math.round(40 * scaleFactor);
 
-    // 背景框位置（右上角）
-    window.SCORE_BG_X = rightEdge - window.SCORE_BG_WIDTH;
-    window.SCORE_BG_Y = topBase;
+    SCORE_BG_X = rightEdge - SCORE_BG_WIDTH;
+    SCORE_BG_Y = topBase;
 
-    // 金幣圖片在背景框內的位置
-    window.COIN_X = window.SCORE_BG_X + Math.round(12 * scaleFactor);
-    window.COIN_Y = window.SCORE_BG_Y + Math.round((window.SCORE_BG_HEIGHT - window.COIN_HEIGHT) / 2);
+    COIN_X = SCORE_BG_X + Math.round(12 * scaleFactor);
+    COIN_Y = SCORE_BG_Y + Math.round((SCORE_BG_HEIGHT - COIN_HEIGHT) / 2);
 
-    // 分數字體大小和位置
-    window.SCORE_FONT_SIZE = Math.round(22 * scaleFactor);
-    window.SCORE_TEXT_X = window.COIN_X + window.COIN_WIDTH + Math.round(8 * scaleFactor);
-    window.SCORE_TEXT_Y = window.SCORE_BG_Y + Math.round(window.SCORE_BG_HEIGHT * 0.68);
+    SCORE_FONT_SIZE = Math.round(22 * scaleFactor);
+    SCORE_TEXT_X = COIN_X + COIN_WIDTH + Math.round(8 * scaleFactor);
+    SCORE_TEXT_Y = SCORE_BG_Y + Math.round(SCORE_BG_HEIGHT * 0.68);
 
-    window.INFO_FONT_SIZE = Math.round(18 * scaleFactor);
+    INFO_FONT_SIZE = Math.round(18 * scaleFactor);
 
-    window.REMAIN_TEXT_X = window.COIN_X + Math.round(8 * scaleFactor);
-    window.REMAIN_TEXT_Y = window.SCORE_BG_Y + Math.round(window.SCORE_BG_HEIGHT * 1.65);
+    REMAIN_TEXT_X = COIN_X + Math.round(8 * scaleFactor);
+    REMAIN_TEXT_Y = SCORE_BG_Y + Math.round(SCORE_BG_HEIGHT * 1.65);
 }
 
 function generateForbiddenPositions(level) {
@@ -1014,36 +1016,36 @@ function renderUI() {
 
     // 繪製背景框
     ctx.fillStyle = colors.scoreBg;
-    roundRect(ctx, window.SCORE_BG_X, window.SCORE_BG_Y, window.SCORE_BG_WIDTH, window.SCORE_BG_HEIGHT, 25);
+    roundRect(ctx, SCORE_BG_X, SCORE_BG_Y, SCORE_BG_WIDTH, SCORE_BG_HEIGHT, 25);
     ctx.fill();
 
     // 繪製金幣圖片
     if (coinImg && coinImg.complete) {
-        ctx.drawImage(coinImg, window.COIN_X, window.COIN_Y, window.COIN_WIDTH, window.COIN_HEIGHT);
+        ctx.drawImage(coinImg, COIN_X, COIN_Y, COIN_WIDTH, COIN_HEIGHT);
     } else {
         // 備用方案
-        ctx.font = `${window.SCORE_FONT_SIZE}px "Segoe UI"`;
+        ctx.font = `${SCORE_FONT_SIZE}px "Segoe UI"`;
         ctx.fillStyle = '#ffeaac';
-        ctx.fillText('💰', window.COIN_X, window.COIN_Y + window.COIN_HEIGHT * 0.7);
+        ctx.fillText('💰', COIN_X, COIN_Y + COIN_HEIGHT * 0.7);
     }
 
     // 繪製分數（總分）
-    ctx.font = `bold ${window.SCORE_FONT_SIZE}px "Segoe UI"`;
+    ctx.font = `bold ${SCORE_FONT_SIZE}px "Segoe UI"`;
     ctx.fillStyle = colors.scoreText;
-    ctx.fillText(`${displayScore}`, window.SCORE_TEXT_X, window.SCORE_TEXT_Y);
-    const infoFontSize = Math.max(14, Math.round(window.INFO_FONT_SIZE * 0.9));
+    ctx.fillText(`${displayScore}`, SCORE_TEXT_X, SCORE_TEXT_Y);
+    const infoFontSize = Math.max(14, Math.round(INFO_FONT_SIZE * 0.9));
     // 繪製剩餘卡片數量（可選，放在分數下方）
     let remain = stackCards.filter(c => !c.removed && !c.isAnimating).length;
 
     ctx.font = `${infoFontSize}px "Segoe UI"`;
     ctx.fillStyle = colors.subtitleText;
-    ctx.fillText(`剩馀 ${remain}`, window.REMAIN_TEXT_X, window.REMAIN_TEXT_Y);
+    ctx.fillText(`剩馀 ${remain}`, REMAIN_TEXT_X, REMAIN_TEXT_Y);
 
     // === 新增：在第幾關文字（放在剩餘卡牌下方）===
     // 動態計算關卡文字的位置和大小（基於剩餘卡牌文字的位置）
    
-    const levelTextY = window.REMAIN_TEXT_Y + Math.round(window.INFO_FONT_SIZE * 1.3);
-    const levelTextX = window.REMAIN_TEXT_X;
+    const levelTextY = REMAIN_TEXT_Y + Math.round(INFO_FONT_SIZE * 1.3);
+    const levelTextX = REMAIN_TEXT_X;
 
     ctx.fillStyle = colors.subtitleText;
     ctx.fillText(`第 ${currentLevel} / ${TOTAL_LEVELS} 關`, levelTextX, levelTextY);
@@ -1053,17 +1055,17 @@ function renderUI() {
     if (titleImg && titleImg.complete) {
         ctx.drawImage(
             titleImg,
-            window.TITLE_X,
-            window.TITLE_Y,
-            window.TITLE_WIDTH,
-            window.TITLE_HEIGHT
+            TITLE_X,
+            TITLE_Y,
+            TITLE_WIDTH,
+            TITLE_HEIGHT
         );
     } else {
         // 備用文字（也使用動態字體大小）
         const titleFontSize = Math.round(28 * (Math.min(screenWidth / 375, screenHeight / 667)));
         ctx.font = `bold ${titleFontSize}px "KaiTi", "華文楷書"`;
         ctx.fillStyle = '#5a3c1a';
-        ctx.fillText('福一下哥', window.TITLE_X, window.TITLE_Y + window.TITLE_HEIGHT * 0.7);
+        ctx.fillText('福一下哥', TITLE_X, TITLE_Y + TITLE_HEIGHT * 0.7);
     }
 
     // 繪製設定面板
@@ -1153,8 +1155,8 @@ function renderUI() {
             ctx.fillStyle = isCurrent ? '#ffffff' : '#4f2d0a';
             ctx.font = `bold ${Math.min(14, Math.round(levelBtnHeight * 0.5))}px "Segoe UI"`;
             ctx.fillText(`${levelNum}`, btnX + levelBtnWidth * 0.35, btnY + levelBtnHeight * 0.7);
-            if (!window.levelButtons1) window.levelButtons1 = [];
-            window.levelButtons1[i] = { x: btnX, y: btnY, w: levelBtnWidth, h: levelBtnHeight, level: levelNum };
+            if (!levelButtons1) levelButtons1 = [];
+            levelButtons1[i] = { x: btnX, y: btnY, w: levelBtnWidth, h: levelBtnHeight, level: levelNum };
         }
 
         // 關卡按鈕行2 (6-10)
@@ -1169,8 +1171,8 @@ function renderUI() {
             ctx.fillStyle = isCurrent ? '#ffffff' : '#4f2d0a';
             ctx.font = `bold ${Math.min(14, Math.round(levelBtnHeight * 0.5))}px "Segoe UI"`;
             ctx.fillText(`${levelNum}`, btnX + levelBtnWidth * 0.35, btnY + levelBtnHeight * 0.7);
-            if (!window.levelButtons2) window.levelButtons2 = [];
-            window.levelButtons2[i] = { x: btnX, y: btnY, w: levelBtnWidth, h: levelBtnHeight, level: levelNum };
+            if (!levelButtons2) levelButtons2 = [];
+            levelButtons2[i] = { x: btnX, y: btnY, w: levelBtnWidth, h: levelBtnHeight, level: levelNum };
         }
 
         // 關閉按鈕
@@ -1245,8 +1247,8 @@ function onTouchStart(e) {
         }
 
         // 關卡按鈕行1
-        if (window.levelButtons1) {
-            for (let btn of window.levelButtons1) {
+        if (levelButtons1) {
+            for (let btn of levelButtons1) {
                 if (x * cardScale + offsetX >= btn.x && x * cardScale + offsetX <= btn.x + btn.w &&
                     y * cardScale + offsetY >= btn.y && y * cardScale + offsetY <= btn.y + btn.h) {
                     selectLevel(btn.level);
@@ -1256,8 +1258,8 @@ function onTouchStart(e) {
         }
 
         // 關卡按鈕行2
-        if (window.levelButtons2) {
-            for (let btn of window.levelButtons2) {
+        if (levelButtons2) {
+            for (let btn of levelButtons2) {
                 if (x * cardScale + offsetX >= btn.x && x * cardScale + offsetX <= btn.x + btn.w &&
                     y * cardScale + offsetY >= btn.y && y * cardScale + offsetY <= btn.y + btn.h) {
                     selectLevel(btn.level);
