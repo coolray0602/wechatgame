@@ -1,4 +1,4 @@
-// game.js - 福了個哥（響應式完整版）
+// game.js - 福一下哥（響應式完整版，分數跨關累加，無最高分記錄）
 
 // ==================== 可調整參數（基礎值，會根據螢幕大小自動調整） ====================
 const BASE_CARD_SIZE = 65;
@@ -31,35 +31,91 @@ let CARD_SIZE, GRID_STEP, HALF_SHIFT;
 let PAD_LEFT, PAD_TOP;
 let SLOT_X_OFFSET, SLOT_Y_OFFSET, BTN_Y_OFFSET;
 
+// ==================== 累積總分（跨關卡） ====================
+let totalScore = 0;           // 總累積分數（所有關卡累加）
+
 function calculateDynamicSizes() {
     const sys = wx.getSystemInfoSync();
     const screenWidth = sys.screenWidth;
     const screenHeight = sys.screenHeight;
-    
+
     // 根據螢幕寬度計算縮放比例
     const scaleFactor = Math.min(screenWidth / 375, screenHeight / 667) * 1.0;
-    
+
     CARD_SIZE = Math.round(BASE_CARD_SIZE * scaleFactor);
     GRID_STEP = CARD_SIZE;
     HALF_SHIFT = CARD_SIZE / 2;
-    
+
     PAD_LEFT = Math.round(30 * scaleFactor);
     PAD_TOP = Math.round(170 * scaleFactor);
-    
+
     SLOT_X_OFFSET = Math.round(-20 * scaleFactor);
     SLOT_Y_OFFSET = Math.round(-40 * scaleFactor);
     BTN_Y_OFFSET = 0;
+
+    // === 新增：標題圖片動態尺寸 ===
+    // 基礎值（以 375 螢幕寬度為基準）
+    const BASE_TITLE_WIDTH = 528;
+    const BASE_TITLE_HEIGHT = 200;
+    const BASE_TITLE_X = 20;
+    const BASE_TITLE_Y = 40;
+
+    // 儲存到全域變數
+    window.TITLE_WIDTH = Math.round(BASE_TITLE_WIDTH * scaleFactor / 3);
+    window.TITLE_HEIGHT = Math.round(BASE_TITLE_HEIGHT * scaleFactor / 3);
+    window.TITLE_X = Math.round(BASE_TITLE_X * scaleFactor);
+    window.TITLE_Y = Math.round(BASE_TITLE_Y * scaleFactor);
+
+    // === 金幣圖片動態尺寸與位置（右上角）===
+    const BASE_COIN_WIDTH = 100;
+    const BASE_COIN_HEIGHT = 127;
+    const coinScale = scaleFactor * 0.45; // 縮小比例，避免太大
+
+    window.COIN_WIDTH = Math.round(BASE_COIN_WIDTH * coinScale);
+    window.COIN_HEIGHT = Math.round(BASE_COIN_HEIGHT * coinScale);
+
+    // 獲取膠囊按鈕位置資訊
+    const menuButtonInfo = wx.getMenuButtonBoundingClientRect();
+    const menuButtonRight = menuButtonInfo.right; // 膠囊右邊緣位置
+    const menuButtonBottom = menuButtonInfo.bottom; // 膠囊底部位置
+    const menuButtonTop = menuButtonInfo.top; // 膠囊頂部位置
+
+    // 計算右上角區域的起點（膠囊下方 15px）
+    const rightEdge = screenWidth - 20; // 右邊距 20px
+    const topBase = menuButtonBottom + 15; // 膠囊下方 15px
+
+    // 分數背景框的尺寸
+    window.SCORE_BG_WIDTH = Math.round(140 * scaleFactor);
+    window.SCORE_BG_HEIGHT = Math.round(40 * scaleFactor);
+
+    // 背景框位置（右上角）
+    window.SCORE_BG_X = rightEdge - window.SCORE_BG_WIDTH;
+    window.SCORE_BG_Y = topBase;
+
+    // 金幣圖片在背景框內的位置
+    window.COIN_X = window.SCORE_BG_X + Math.round(12 * scaleFactor);
+    window.COIN_Y = window.SCORE_BG_Y + Math.round((window.SCORE_BG_HEIGHT - window.COIN_HEIGHT) / 2);
+
+    // 分數字體大小和位置
+    window.SCORE_FONT_SIZE = Math.round(22 * scaleFactor);
+    window.SCORE_TEXT_X = window.COIN_X + window.COIN_WIDTH + Math.round(8 * scaleFactor);
+    window.SCORE_TEXT_Y = window.SCORE_BG_Y + Math.round(window.SCORE_BG_HEIGHT * 0.68);
+
+    window.INFO_FONT_SIZE = Math.round(18 * scaleFactor);
+
+    window.REMAIN_TEXT_X = window.COIN_X + Math.round(8 * scaleFactor);
+    window.REMAIN_TEXT_Y = window.SCORE_BG_Y + Math.round(window.SCORE_BG_HEIGHT * 1.65);
 }
 
 function generateForbiddenPositions(level) {
     const forbiddenCount = 10 + (level - 1) * 3;
     const allBasePositions = generateBaseGridForForbidden();
-    
+
     for (let i = allBasePositions.length - 1; i > 0; i--) {
         let j = Math.floor(Math.random() * (i + 1));
         [allBasePositions[i], allBasePositions[j]] = [allBasePositions[j], allBasePositions[i]];
     }
-    
+
     return allBasePositions.slice(0, forbiddenCount);
 }
 
@@ -67,9 +123,9 @@ function generateBaseGridForForbidden() {
     let points = [];
     for (let c = 0; c < COLS; c++) {
         for (let r = 0; r < ROWS; r++) {
-            points.push({ 
-                x: BASE_MIN_X + c * GRID_STEP, 
-                y: BASE_MIN_Y + r * GRID_STEP 
+            points.push({
+                x: BASE_MIN_X + c * GRID_STEP,
+                y: BASE_MIN_Y + r * GRID_STEP
             });
         }
     }
@@ -127,14 +183,13 @@ let activeAnimations = [];
 // ==================== 全域變數 ====================
 let canvas, ctx;
 let gameActive = true;
-let score = 0;
+let currentRoundScore = 0;
 let slotCards = [];
 let stackCards = [];
 let nextCardId = 1;
 
 let currentLevel = 1;
 const TOTAL_LEVELS = 10;
-let levelBestScores = new Array(TOTAL_LEVELS).fill(0);
 
 let screenWidth, screenHeight;
 let offsetX = 0, offsetY = 0;
@@ -152,12 +207,12 @@ const colors = {
     border: '#b97f3a',
     text: '#5a2f0a',
     scoreBg: '#2c2b28',
-    scoreText: '#ffeaac',
     slotBg: '#e7dbb6',
     titleText: '#5a3c1a',
     subtitleText: '#8b6942',
     remainText: '#4a2e0a',
-    settingsPanel: '#fef3dd'
+    settingsPanel: '#fef3dd',
+    scoreText: '#ffeaac'
 };
 
 // ==================== 動態計算的邊界 ====================
@@ -179,7 +234,7 @@ function initAudio() {
     clickAudio.onError((err) => {
         console.error("點擊音效載入失敗:", err);
     });
-    
+
     bgmAudio = wx.createInnerAudioContext();
     bgmAudio.src = BGM1_URL;
     bgmAudio.loop = true;
@@ -187,7 +242,7 @@ function initAudio() {
     bgmAudio.onError((err) => {
         console.error("背景音樂載入失敗:", err);
     });
-    
+
     if (bgmEnabled) {
         bgmAudio.play();
     }
@@ -230,8 +285,42 @@ function switchBgm() {
 function loadCardImages() {
     return new Promise((resolve) => {
         let loadedCount = 0;
-        const totalImages = CARD_KEYS.length;
-        
+        const totalImages = CARD_KEYS.length + 2; // +2 為標題圖片和金幣圖片
+
+        // 載入標題圖片
+        const titleImg = wx.createImage();
+        titleImg.src = 'images/title.png';
+        titleImg.onload = () => {
+            loadedCount++;
+            loadedImages['title'] = titleImg;
+            if (loadedCount === totalImages) {
+                console.log(`所有圖片載入完成，共 ${totalImages} 張`);
+                resolve();
+            }
+        };
+        titleImg.onerror = (err) => {
+            console.error('載入標題圖片失敗:', err);
+            loadedCount++;
+            loadedImages['title'] = null;
+            if (loadedCount === totalImages) {
+                resolve();
+            }
+        };
+        // 載入金幣圖片 (新增)
+        const coinImg = wx.createImage();
+        coinImg.src = 'images/coin.png';
+        coinImg.onload = () => {
+            loadedCount++;
+            loadedImages['coin'] = coinImg;
+            if (loadedCount === totalImages) resolve();
+        };
+        coinImg.onerror = (err) => {
+            console.error('載入金幣圖片失敗:', err);
+            loadedCount++;
+            loadedImages['coin'] = null;
+            if (loadedCount === totalImages) resolve();
+        };
+        // 載入卡牌圖片（原有程式碼）
         for (let key of CARD_KEYS) {
             const img = wx.createImage();
             img.src = `images/${CARD_IMAGES[key]}`;
@@ -260,9 +349,9 @@ function generateBaseGrid() {
     let points = [];
     for (let c = 0; c < COLS; c++) {
         for (let r = 0; r < ROWS; r++) {
-            points.push({ 
-                x: BASE_MIN_X + c * GRID_STEP, 
-                y: BASE_MIN_Y + r * GRID_STEP 
+            points.push({
+                x: BASE_MIN_X + c * GRID_STEP,
+                y: BASE_MIN_Y + r * GRID_STEP
             });
         }
     }
@@ -287,16 +376,16 @@ function getOffsetPositionByDir(basePos, dir) {
 
 // ==================== 重疊檢測 ====================
 function doesOverlap(newX, newY, layer, existingCards) {
-    const newLeft = newX - CARD_SIZE/2;
-    const newRight = newX + CARD_SIZE/2;
-    const newTop = newY - CARD_SIZE/2;
-    const newBottom = newY + CARD_SIZE/2;
+    const newLeft = newX - CARD_SIZE / 2;
+    const newRight = newX + CARD_SIZE / 2;
+    const newTop = newY - CARD_SIZE / 2;
+    const newBottom = newY + CARD_SIZE / 2;
     for (let c of existingCards) {
         if (c.layer !== layer) continue;
-        const left = c.x - CARD_SIZE/2;
-        const right = c.x + CARD_SIZE/2;
-        const top = c.y - CARD_SIZE/2;
-        const bottom = c.y + CARD_SIZE/2;
+        const left = c.x - CARD_SIZE / 2;
+        const right = c.x + CARD_SIZE / 2;
+        const top = c.y - CARD_SIZE / 2;
+        const bottom = c.y + CARD_SIZE / 2;
         if (newRight > left && newLeft < right && newBottom > top && newTop < bottom) {
             return true;
         }
@@ -315,7 +404,7 @@ function generateLevel(level) {
         let targetCount = cfg.cardsPerLayer;
         let availableBase = getAvailableBasePositions(layer, cards);
         let toPlace = Math.min(targetCount, availableBase.length);
-        
+
         for (let i = availableBase.length - 1; i > 0; i--) {
             let j = Math.floor(Math.random() * (i + 1));
             [availableBase[i], availableBase[j]] = [availableBase[j], availableBase[i]];
@@ -364,7 +453,7 @@ function generateLevel(level) {
                 }
                 for (let base of shuffledBase) {
                     if (isPositionForbidden(base.x, base.y)) continue;
-                    
+
                     let candidateX = base.x;
                     let candidateY = base.y;
                     if (layer > 0 && offsetDir !== -1) {
@@ -417,7 +506,7 @@ function generateIconPool(totalCards) {
 
 // ==================== 遊戲邏輯 ====================
 function isRectOverlap(card1, card2) {
-    const h = CARD_SIZE/2;
+    const h = CARD_SIZE / 2;
     const l1 = card1.x - h, r1 = card1.x + h, t1 = card1.y - h, b1 = card1.y + h;
     const l2 = card2.x - h, r2 = card2.x + h, t2 = card2.y - h, b2 = card2.y + h;
     return !(r1 <= l2 || l1 >= r2 || b1 <= t2 || t1 >= b2);
@@ -439,6 +528,16 @@ function updateAllCardsClickable() {
     }
 }
 
+// 當卡牌消除時增加分數（只增加當前關卡分數）
+function addScore(amount) {
+    currentRoundScore += amount;
+}
+
+// 獲取當前顯示的總分（當前關卡分數 + 之前關卡累積的總分）
+function getDisplayScore() {
+    return totalScore + currentRoundScore;
+}
+
 function eliminateFromSlot() {
     let changed = false;
     while (true) {
@@ -453,7 +552,7 @@ function eliminateFromSlot() {
             newSlot.push(icon);
         }
         slotCards = newSlot;
-        score += 10;
+        addScore(10);  // 消除一組得10分（當前關卡分數）
         changed = true;
     }
     if (changed) {
@@ -465,34 +564,41 @@ function checkGameEnd() {
     let remaining = stackCards.filter(c => !c.removed).length;
     if (remaining === 0 && slotCards.length === 0 && gameActive) {
         gameActive = false;
-        let prevBest = levelBestScores[currentLevel - 1];
-        if (score > prevBest) levelBestScores[currentLevel - 1] = score;
+        
+        // ★ 將當前關卡分數累加到總分
+        totalScore += currentRoundScore;
+        currentRoundScore = 0;  // 重置當前關卡分數
+        
         if (currentLevel < TOTAL_LEVELS) {
             wx.showModal({
                 title: `🎉 第${currentLevel}關通關！`,
-                content: `本關得分：${score}\n最高分：${Math.max(prevBest, score)}`,
+                content: `累積總分：${totalScore}\n下一關即將開始！`,
                 confirmText: '下一關',
-                cancelText: '重玩',
+                cancelText: '重玩此關',
                 success: (res) => {
-                    if (res.confirm) { 
-                        currentLevel++; 
+                    if (res.confirm) {
+                        currentLevel++;
                         shuffleRemainingCount = 3;
-                        loadLevel(currentLevel); 
-                    } else { 
+                        loadLevel(currentLevel, true);  // true 表示保留總分
+                    } else {
                         shuffleRemainingCount = 3;
-                        loadLevel(currentLevel); 
+                        loadLevel(currentLevel, false); // false 表示重玩此關不保留本次分數
+                        // 注意：重玩此關時，之前累積的 totalScore 不變，但 currentRoundScore 已歸零
                     }
                 }
             });
         } else {
+            // 最終通關，顯示累積總分
             wx.showModal({
                 title: '🏆 恭喜通關全部關卡！',
-                content: `最終得分：${score}`,
+                content: `累積總得分：${totalScore}`,
                 showCancel: false,
-                success: () => { 
-                    currentLevel = 1; 
+                success: () => {
+                    // 遊戲完成後可以選擇重置或回到第一關
+                    totalScore = 0;
+                    currentLevel = 1;
                     shuffleRemainingCount = 3;
-                    loadLevel(1); 
+                    loadLevel(1, false);
                 }
             });
         }
@@ -505,19 +611,23 @@ function checkGameEnd() {
         for (let v of cnt.values()) if (v >= 3) can = true;
         if (!can) {
             gameActive = false;
+            
+            // 失敗時，不保留當前關卡分數（總分不變）
+            // 可選：顯示失敗提示
             wx.showModal({
                 title: '😭 遊戲失敗',
-                content: `本關得分：${score}`,
-                confirmText: '重玩',
-                cancelText: '第一關',
+                content: `累積總分：${totalScore}`,
+                confirmText: '重玩此關',
+                cancelText: '回到第一關',
                 success: (res) => {
                     if (res.confirm) {
                         shuffleRemainingCount = 3;
-                        loadLevel(currentLevel);
-                    } else { 
-                        currentLevel = 1; 
+                        loadLevel(currentLevel, false); // 重玩此關，不保留本次失敗的分數
+                    } else {
+                        totalScore = 0;  // 重置總分
+                        currentLevel = 1;
                         shuffleRemainingCount = 3;
-                        loadLevel(1); 
+                        loadLevel(1, false);
                     }
                 }
             });
@@ -534,13 +644,13 @@ function easeOutCubic(t) {
 
 function startCardAnimation(card, fromX, fromY, toX, toY) {
     playClickSound();
-    
+
     card.isAnimating = true;
     card.animatedRemoved = true;
-    
+
     const scaleStartTime = Date.now();
     const scaleDuration = 200;
-    
+
     const animObj = {
         card: card,
         fromX: fromX,
@@ -554,17 +664,17 @@ function startCardAnimation(card, fromX, fromY, toX, toY) {
         scale: 1,
         startScale: 1
     };
-    
+
     activeAnimations.push(animObj);
 }
 
 function updateAnimations() {
     const now = Date.now();
     const completedAnimations = [];
-    
+
     for (let i = 0; i < activeAnimations.length; i++) {
         const anim = activeAnimations[i];
-        
+
         if (anim.phase === 'scale') {
             const elapsed = now - anim.startTime;
             if (elapsed < anim.scaleDuration) {
@@ -580,7 +690,7 @@ function updateAnimations() {
                 anim.scale = 1;
             }
         }
-        
+
         if (anim.phase === 'fly') {
             const elapsed = now - anim.flyStartTime;
             if (elapsed < anim.flyDuration) {
@@ -598,11 +708,11 @@ function updateAnimations() {
             }
         }
     }
-    
+
     for (let i = completedAnimations.length - 1; i >= 0; i--) {
         activeAnimations.splice(completedAnimations[i], 1);
     }
-    
+
     if (completedAnimations.length > 0) {
         updateAllCardsClickable();
         eliminateFromSlot();
@@ -613,25 +723,36 @@ function updateAnimations() {
 function onCardClick(card) {
     if (!gameActive || !card.clickable) return;
     if (card.isAnimating) return;
-    
+
     const scaleFactor = CARD_SIZE / BASE_CARD_SIZE;
     const slotX = (20 + SLOT_X_OFFSET) * scaleFactor;
     const slotY = MAX_Y - 60;
-    
+
     const targetSlotIndex = slotCards.length;
     const targetX = slotX + 12 + targetSlotIndex * 52;
     const targetY = slotY;
-    console.log("slotY="+slotY+" , targetY="+targetY + " , MAX_Y="+MAX_Y+" , SLOT_Y_OFFSET="+SLOT_Y_OFFSET + " , scaleFactor="+scaleFactor);
-    const fromX = card.x - CARD_SIZE/2;
-    const fromY = card.y - CARD_SIZE/2;
-    
+    console.log("slotY=" + slotY + " , targetY=" + targetY + " , MAX_Y=" + MAX_Y + " , SLOT_Y_OFFSET=" + SLOT_Y_OFFSET + " , scaleFactor=" + scaleFactor);
+    const fromX = card.x - CARD_SIZE / 2;
+    const fromY = card.y - CARD_SIZE / 2;
+
     startCardAnimation(card, fromX, fromY, targetX, targetY);
 }
 
-function loadLevel(level) {
+// keepTotalScore: 是否保留總分（通關時 true，重玩關卡或切換關卡時 false 或看情況）
+function loadLevel(level, keepTotalScore = false) {
     currentLevel = level;
-    forbiddenPositions = generateForbiddenPositions(level);
     
+    if (!keepTotalScore) {
+        // 切換關卡或重玩時，如果不保留當前關卡分數，則只重置 currentRoundScore
+        // totalScore 保持不變（從之前關卡累積來的）
+        // 注意：這意味著如果玩家手動切換關卡，之前關卡的總分仍保留
+        // 如果想要手動切換關卡時重置總分，可以將 totalScore 設為 0
+        currentRoundScore = 0;
+    }
+    // 如果 keepTotalScore === true，表示通關後進入下一關，此時 totalScore 已經累加，currentRoundScore 已歸零
+    
+    forbiddenPositions = generateForbiddenPositions(level);
+
     nextCardId = 1;
     let levelData = generateLevel(level);
     let positions = levelData.cards;
@@ -653,17 +774,19 @@ function loadLevel(level) {
     stackCards = newCards;
     updateAllCardsClickable();
     slotCards = [];
-    score = 0;
     gameActive = true;
     activeAnimations = [];
     shuffleRemainingCount = 3;
-    
+
     settingsVisible = false;
 }
 
-function resetGame() { 
+function resetGame() {
+    // 重置遊戲：重置總分和當前關卡分數
+    totalScore = 0;
+    currentRoundScore = 0;
     shuffleRemainingCount = 3;
-    loadLevel(currentLevel); 
+    loadLevel(currentLevel, false);
 }
 
 function shuffleRemaining() {
@@ -676,14 +799,14 @@ function shuffleRemaining() {
         });
         return;
     }
-    
+
     let active = stackCards.filter(c => !c.removed && !c.isAnimating);
     if (active.length === 0) return;
-    
+
     let icons = active.map(c => c.icon);
     let shuffled = shuffleArray([...icons]);
     active.forEach((c, idx) => c.icon = shuffled[idx]);
-    
+
     shuffleRemainingCount--;
     wx.showToast({
         title: `洗牌剩餘 ${shuffleRemainingCount} 次`,
@@ -698,7 +821,11 @@ function toggleSettings() {
 
 function selectLevel(level) {
     if (level >= 1 && level <= TOTAL_LEVELS) {
-        loadLevel(level);
+        // 手動切換關卡時，重置總分和當前分數（可選，根據需求）
+        // 如果想要保留總分，可以注釋掉 totalScore = 0
+        totalScore = 0;
+        currentRoundScore = 0;
+        loadLevel(level, false);
     }
     settingsVisible = false;
 }
@@ -722,17 +849,17 @@ function drawCard(ctx, card, x, y, scale = 1, alpha = 1, isAnimating = false, ro
     const img = loadedImages[card.icon];
     const size = CARD_SIZE * scale;
     const offset = (size - CARD_SIZE) / 2;
-    
+
     ctx.save();
-    
+
     if (rotation > 0) {
-        const centerX = x + size/2;
-        const centerY = y + size/2;
+        const centerX = x + size / 2;
+        const centerY = y + size / 2;
         ctx.translate(centerX, centerY);
         ctx.rotate(rotation);
         ctx.translate(-centerX, -centerY);
     }
-    
+
     if (isAnimating) {
         ctx.shadowBlur = 8;
         ctx.shadowColor = 'rgba(0,0,0,0.3)';
@@ -741,7 +868,7 @@ function drawCard(ctx, card, x, y, scale = 1, alpha = 1, isAnimating = false, ro
         ctx.shadowBlur = 2;
     }
     ctx.globalAlpha = alpha;
-    
+
     if (img && img.complete) {
         ctx.drawImage(img, x - offset, y - offset, size, size);
     } else {
@@ -751,21 +878,21 @@ function drawCard(ctx, card, x, y, scale = 1, alpha = 1, isAnimating = false, ro
         ctx.fillStyle = '#5a2f0a';
         ctx.fillText(card.icon.substring(0, 3), x - offset + 10, y - offset + size - 10);
     }
-    
+
     ctx.shadowBlur = 0;
-    
+
     if (!card.clickable && !card.removed && !isAnimating) {
         ctx.fillStyle = 'rgba(120, 100, 80, 0.3)';
         roundRect(ctx, x - offset, y - offset, size, size, 8);
         ctx.fill();
     }
-    
+
     ctx.restore();
 }
 
 function renderUI() {
     ctx.clearRect(0, 0, screenWidth, screenHeight);
-    
+
     ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, screenWidth, screenHeight);
 
@@ -773,45 +900,21 @@ function renderUI() {
     ctx.translate(offsetX, offsetY);
     ctx.scale(cardScale, cardScale);
 
-   // 繪製除錯邊界
+    // 繪製除錯邊界
     drawDebugBounds(ctx);
 
     // 動態計算字體大小
     const titleFontSize = Math.max(24, Math.round(32 * (CARD_SIZE / BASE_CARD_SIZE)));
     const subtitleFontSize = Math.max(16, Math.round(20 * (CARD_SIZE / BASE_CARD_SIZE)));
-    const infoFontSize = Math.max(12, Math.round(16 * (CARD_SIZE / BASE_CARD_SIZE)));
-    const scoreFontSize = Math.max(18, Math.round(22 * (CARD_SIZE / BASE_CARD_SIZE)));
-
-    // 標題與資訊
-    ctx.font = `bold ${titleFontSize}px "KaiTi", "華文楷書"`;
-    ctx.fillStyle = colors.titleText;
-    ctx.fillText('福了個哥', 25, 55);
-    ctx.font = `bold ${subtitleFontSize}px "Segoe UI"`;
-    ctx.fillStyle = colors.subtitleText;
-    ctx.fillText(`第 ${currentLevel} / ${TOTAL_LEVELS} 關`, 25, 95);
-    let best = levelBestScores[currentLevel - 1];
-    ctx.font = `${infoFontSize}px "Segoe UI"`;
-    ctx.fillStyle = '#b87c3a';
-    ctx.fillText(`🏆 最高 ${best}`, 25, 128);
-    
-    let remain = stackCards.filter(c => !c.removed && !c.isAnimating).length;
-    ctx.fillStyle = colors.scoreBg;
-    roundRect(ctx, 260, 15, 120, 50, 25);
-    ctx.fill();
-    ctx.font = `bold ${scoreFontSize}px "Segoe UI"`;
-    ctx.fillStyle = colors.scoreText;
-    ctx.fillText(`🐏 ${score}`, 272, 48);
-    ctx.font = `bold ${infoFontSize}px "Segoe UI"`;
-    ctx.fillStyle = colors.remainText;
-    ctx.fillText(`📦 剩餘 ${remain}`, 272, 100);
+    const scoreFontSize = Math.max(18, Math.round(50 * (CARD_SIZE / BASE_CARD_SIZE)));
 
     // 設定按鈕
     ctx.fillStyle = '#ffdd99';
     roundRect(ctx, 25, 140, 80, 35, 18);
     ctx.fill();
     ctx.fillStyle = '#4f2d0a';
-    ctx.font = `bold ${infoFontSize}px "Segoe UI"`;
-    ctx.fillText('⚙️ 設定', 35, 163);
+
+    ctx.fillText('⚙️', 35, 163);
     settingsBtnRect = { x: 25, y: 140, w: 80, h: 35 };
 
     // 繪製卡牌
@@ -819,22 +922,22 @@ function renderUI() {
     for (let c of sorted) {
         if (c.removed) continue;
         if (c.isAnimating) continue;
-        let x = c.x - CARD_SIZE/2, y = c.y - CARD_SIZE/2;
+        let x = c.x - CARD_SIZE / 2, y = c.y - CARD_SIZE / 2;
         drawCard(ctx, c, x, y, 1, 1, false, 0);
     }
-    
+
     // 繪製卡槽
     let slotX = 20 + SLOT_X_OFFSET;
     let slotY = MAX_Y - 40 + SLOT_Y_OFFSET;
     let slotWidth = 380;
     let slotHeight = 60;
-    
+
     ctx.fillStyle = colors.slotBg;
     roundRect(ctx, slotX, slotY, slotWidth, slotHeight, 28);
     ctx.fill();
     ctx.strokeStyle = '#b9975a';
     ctx.stroke();
-    
+
     // 7個槽位卡片
     for (let i = 0; i < 7; i++) {
         let sx = slotX + 12 + i * 52;
@@ -844,7 +947,7 @@ function renderUI() {
             ctx.fillStyle = '#fff3df';
             roundRect(ctx, sx, slotY + 8, 48, 44, 12);
             ctx.fill();
-            
+
             if (img && img.complete) {
                 ctx.drawImage(img, sx + 4, slotY + 10, 40, 40);
             } else {
@@ -861,7 +964,7 @@ function renderUI() {
             ctx.fillText('?', sx + 18, slotY + 40);
         }
     }
-    
+
     // 繪製動畫中的卡片
     for (let anim of activeAnimations) {
         const card = anim.card;
@@ -883,7 +986,7 @@ function renderUI() {
     // 按鈕
     let btnY = slotY + 72 + BTN_Y_OFFSET;
     const buttonFontSize = Math.max(14, Math.round(18 * (CARD_SIZE / BASE_CARD_SIZE)));
-    
+
     ctx.fillStyle = '#ffdd99';
     roundRect(ctx, 100, btnY, 95, 42, 35);
     ctx.fill();
@@ -894,7 +997,7 @@ function renderUI() {
     ctx.fillStyle = '#b16224';
     ctx.fillText(`x${shuffleRemainingCount}`, 178, btnY + 25);
     shuffleBtnRect = { x: 100, y: btnY, w: 95, h: 42 };
-    
+
     ctx.fillStyle = '#ffdd99';
     roundRect(ctx, 215, btnY, 95, 42, 35);
     ctx.fill();
@@ -904,26 +1007,84 @@ function renderUI() {
     resetBtnRect = { x: 215, y: btnY, w: 95, h: 42 };
 
     ctx.restore();
+    
+    // === 繪製右上角得分面板（在螢幕坐標系，不受遊戲縮放影響）===
+    const coinImg = loadedImages['coin'];
+    const displayScore = getDisplayScore();  // 獲取總分顯示
+
+    // 繪製背景框
+    ctx.fillStyle = colors.scoreBg;
+    roundRect(ctx, window.SCORE_BG_X, window.SCORE_BG_Y, window.SCORE_BG_WIDTH, window.SCORE_BG_HEIGHT, 25);
+    ctx.fill();
+
+    // 繪製金幣圖片
+    if (coinImg && coinImg.complete) {
+        ctx.drawImage(coinImg, window.COIN_X, window.COIN_Y, window.COIN_WIDTH, window.COIN_HEIGHT);
+    } else {
+        // 備用方案
+        ctx.font = `${window.SCORE_FONT_SIZE}px "Segoe UI"`;
+        ctx.fillStyle = '#ffeaac';
+        ctx.fillText('💰', window.COIN_X, window.COIN_Y + window.COIN_HEIGHT * 0.7);
+    }
+
+    // 繪製分數（總分）
+    ctx.font = `bold ${window.SCORE_FONT_SIZE}px "Segoe UI"`;
+    ctx.fillStyle = colors.scoreText;
+    ctx.fillText(`${displayScore}`, window.SCORE_TEXT_X, window.SCORE_TEXT_Y);
+    const infoFontSize = Math.max(14, Math.round(window.INFO_FONT_SIZE * 0.9));
+    // 繪製剩餘卡片數量（可選，放在分數下方）
+    let remain = stackCards.filter(c => !c.removed && !c.isAnimating).length;
+
+    ctx.font = `${infoFontSize}px "Segoe UI"`;
+    ctx.fillStyle = colors.subtitleText;
+    ctx.fillText(`剩馀 ${remain}`, window.REMAIN_TEXT_X, window.REMAIN_TEXT_Y);
+
+    // === 新增：在第幾關文字（放在剩餘卡牌下方）===
+    // 動態計算關卡文字的位置和大小（基於剩餘卡牌文字的位置）
+   
+    const levelTextY = window.REMAIN_TEXT_Y + Math.round(window.INFO_FONT_SIZE * 1.3);
+    const levelTextX = window.REMAIN_TEXT_X;
+
+    ctx.fillStyle = colors.subtitleText;
+    ctx.fillText(`第 ${currentLevel} / ${TOTAL_LEVELS} 關`, levelTextX, levelTextY);
+
+    // === 繪製標題圖片（隨螢幕縮放） ===
+    const titleImg = loadedImages['title'];
+    if (titleImg && titleImg.complete) {
+        ctx.drawImage(
+            titleImg,
+            window.TITLE_X,
+            window.TITLE_Y,
+            window.TITLE_WIDTH,
+            window.TITLE_HEIGHT
+        );
+    } else {
+        // 備用文字（也使用動態字體大小）
+        const titleFontSize = Math.round(28 * (Math.min(screenWidth / 375, screenHeight / 667)));
+        ctx.font = `bold ${titleFontSize}px "KaiTi", "華文楷書"`;
+        ctx.fillStyle = '#5a3c1a';
+        ctx.fillText('福一下哥', window.TITLE_X, window.TITLE_Y + window.TITLE_HEIGHT * 0.7);
+    }
 
     // 繪製設定面板
     if (settingsVisible) {
         ctx.fillStyle = 'rgba(0,0,0,0.7)';
         ctx.fillRect(0, 0, screenWidth, screenHeight);
-        
+
         const panelWidth = Math.min(280, screenWidth * 0.8);
         const panelHeight = Math.min(320, screenHeight * 0.6);
         const panelX = (screenWidth - panelWidth) / 2;
         const panelY = (screenHeight - panelHeight) / 2;
-        
+
         ctx.fillStyle = colors.settingsPanel;
         roundRect(ctx, panelX, panelY, panelWidth, panelHeight, 20);
         ctx.fill();
-        
+
         const panelTitleSize = Math.min(22, Math.round(panelWidth * 0.08));
         ctx.fillStyle = '#5a3c1a';
         ctx.font = `bold ${panelTitleSize}px "KaiTi"`;
         ctx.fillText('設定', panelX + panelWidth * 0.4, panelY + panelHeight * 0.12);
-        
+
         // 分隔線
         ctx.strokeStyle = '#d4c4a0';
         ctx.lineWidth = 1;
@@ -931,9 +1092,9 @@ function renderUI() {
         ctx.moveTo(panelX + 20, panelY + panelHeight * 0.17);
         ctx.lineTo(panelX + panelWidth - 20, panelY + panelHeight * 0.17);
         ctx.stroke();
-        
+
         const itemFontSize = Math.min(16, Math.round(panelWidth * 0.057));
-        
+
         // 背景音樂開關
         ctx.fillStyle = bgmEnabled ? '#2f6b2f' : '#aa5440';
         roundRect(ctx, panelX + panelWidth * 0.72, panelY + panelHeight * 0.24, panelWidth * 0.2, panelHeight * 0.09, 15);
@@ -944,7 +1105,7 @@ function renderUI() {
         ctx.fillStyle = '#4a2e0a';
         ctx.font = `${itemFontSize}px "Segoe UI"`;
         ctx.fillText('背景音樂', panelX + panelWidth * 0.1, panelY + panelHeight * 0.3);
-        
+
         // 切換背景音樂按鈕
         ctx.fillStyle = '#c28a4e';
         roundRect(ctx, panelX + panelWidth * 0.72, panelY + panelHeight * 0.35, panelWidth * 0.2, panelHeight * 0.09, 15);
@@ -955,7 +1116,7 @@ function renderUI() {
         ctx.fillStyle = '#4a2e0a';
         ctx.font = `${itemFontSize}px "Segoe UI"`;
         ctx.fillText('切換BGM', panelX + panelWidth * 0.1, panelY + panelHeight * 0.41);
-        
+
         // 點擊音效開關
         ctx.fillStyle = sfxEnabled ? '#2f6b2f' : '#aa5440';
         roundRect(ctx, panelX + panelWidth * 0.72, panelY + panelHeight * 0.46, panelWidth * 0.2, panelHeight * 0.09, 15);
@@ -966,18 +1127,18 @@ function renderUI() {
         ctx.fillStyle = '#4a2e0a';
         ctx.font = `${itemFontSize}px "Segoe UI"`;
         ctx.fillText('點擊音效', panelX + panelWidth * 0.1, panelY + panelHeight * 0.52);
-        
+
         // 分隔線
         ctx.beginPath();
         ctx.moveTo(panelX + 20, panelY + panelHeight * 0.62);
         ctx.lineTo(panelX + panelWidth - 20, panelY + panelHeight * 0.62);
         ctx.stroke();
-        
+
         // 關卡選擇標籤
         ctx.fillStyle = '#4a2e0a';
         ctx.font = `bold ${itemFontSize}px "Segoe UI"`;
         ctx.fillText('切換關卡', panelX + panelWidth * 0.1, panelY + panelHeight * 0.72);
-        
+
         // 關卡按鈕行1 (1-5)
         const levelBtnWidth = Math.min(45, (panelWidth - 40) / 5.5);
         const levelBtnHeight = Math.min(30, panelHeight * 0.1);
@@ -995,7 +1156,7 @@ function renderUI() {
             if (!window.levelButtons1) window.levelButtons1 = [];
             window.levelButtons1[i] = { x: btnX, y: btnY, w: levelBtnWidth, h: levelBtnHeight, level: levelNum };
         }
-        
+
         // 關卡按鈕行2 (6-10)
         for (let i = 0; i < 5; i++) {
             const levelNum = i + 6;
@@ -1011,11 +1172,11 @@ function renderUI() {
             if (!window.levelButtons2) window.levelButtons2 = [];
             window.levelButtons2[i] = { x: btnX, y: btnY, w: levelBtnWidth, h: levelBtnHeight, level: levelNum };
         }
-        
+
         // 關閉按鈕
         ctx.fillStyle = '#aa5440';
         const closeBtnSize = Math.min(30, panelWidth * 0.1);
-        roundRect(ctx, panelX + panelWidth - closeBtnSize - 10, panelY + 10, closeBtnSize, closeBtnSize, closeBtnSize/2);
+        roundRect(ctx, panelX + panelWidth - closeBtnSize - 10, panelY + 10, closeBtnSize, closeBtnSize, closeBtnSize / 2);
         ctx.fill();
         ctx.fillStyle = '#ffffff';
         ctx.font = `bold ${Math.min(20, Math.round(closeBtnSize * 0.7))}px "Segoe UI"`;
@@ -1027,7 +1188,7 @@ function renderUI() {
         ctx.fillRect(0, 0, screenWidth, screenHeight);
         ctx.font = 'bold 40px "Segoe UI"';
         ctx.fillStyle = '#ffffff';
-        ctx.fillText('遊戲結束', screenWidth/2 - 100, screenHeight/2);
+        ctx.fillText('遊戲結束', screenWidth / 2 - 100, screenHeight / 2);
     }
 }
 
@@ -1036,14 +1197,14 @@ function onTouchStart(e) {
     let t = e.touches[0];
     let x = (t.clientX - offsetX) / cardScale;
     let y = (t.clientY - offsetY) / cardScale;
-    
+
     // 檢查設定面板內的點擊
     if (settingsVisible) {
         const panelWidth = Math.min(280, screenWidth * 0.8);
         const panelHeight = Math.min(320, screenHeight * 0.6);
         const panelX = (screenWidth - panelWidth) / 2;
         const panelY = (screenHeight - panelHeight) / 2;
-        
+
         // 關閉按鈕
         const closeBtnSize = Math.min(30, panelWidth * 0.1);
         const closeX = panelX + panelWidth - closeBtnSize - 10;
@@ -1053,7 +1214,7 @@ function onTouchStart(e) {
             settingsVisible = false;
             return;
         }
-        
+
         // 背景音樂開關按鈕
         const bgmBtnX = panelX + panelWidth * 0.72;
         const bgmBtnY = panelY + panelHeight * 0.24;
@@ -1064,7 +1225,7 @@ function onTouchStart(e) {
             toggleBgm();
             return;
         }
-        
+
         // 切換BGM按鈕
         const switchBgmX = panelX + panelWidth * 0.72;
         const switchBgmY = panelY + panelHeight * 0.35;
@@ -1073,7 +1234,7 @@ function onTouchStart(e) {
             switchBgm();
             return;
         }
-        
+
         // 點擊音效開關按鈕
         const sfxBtnX = panelX + panelWidth * 0.72;
         const sfxBtnY = panelY + panelHeight * 0.46;
@@ -1082,7 +1243,7 @@ function onTouchStart(e) {
             toggleSfx();
             return;
         }
-        
+
         // 關卡按鈕行1
         if (window.levelButtons1) {
             for (let btn of window.levelButtons1) {
@@ -1093,7 +1254,7 @@ function onTouchStart(e) {
                 }
             }
         }
-        
+
         // 關卡按鈕行2
         if (window.levelButtons2) {
             for (let btn of window.levelButtons2) {
@@ -1106,20 +1267,20 @@ function onTouchStart(e) {
         }
         return;
     }
-    
+
     // 檢查設定按鈕
     if (x >= settingsBtnRect.x && x <= settingsBtnRect.x + settingsBtnRect.w &&
         y >= settingsBtnRect.y && y <= settingsBtnRect.y + settingsBtnRect.h) {
         toggleSettings();
         return;
     }
-    
+
     if (!gameActive) return;
-    
+
     let sorted = [...stackCards].filter(c => !c.removed && !c.isAnimating).sort((a, b) => b.layer - a.layer);
     for (let card of sorted) {
-        let left = card.x - CARD_SIZE/2, right = card.x + CARD_SIZE/2;
-        let top = card.y - CARD_SIZE/2, bottom = card.y + CARD_SIZE/2;
+        let left = card.x - CARD_SIZE / 2, right = card.x + CARD_SIZE / 2;
+        let top = card.y - CARD_SIZE / 2, bottom = card.y + CARD_SIZE / 2;
         if (x >= left && x <= right && y >= top && y <= bottom) {
             if (card.clickable) onCardClick(card);
             break;
@@ -1131,9 +1292,9 @@ function onTouchEnd(e) {
     let t = e.changedTouches[0];
     let x = (t.clientX - offsetX) / cardScale;
     let y = (t.clientY - offsetY) / cardScale;
-    
+
     if (settingsVisible) return;
-    
+
     if (x >= shuffleBtnRect.x && x <= shuffleBtnRect.x + shuffleBtnRect.w &&
         y >= shuffleBtnRect.y && y <= shuffleBtnRect.y + shuffleBtnRect.h) {
         shuffleRemaining();
@@ -1146,9 +1307,9 @@ function onTouchEnd(e) {
 
 // ==================== 初始化 ====================
 function init() {
-    
+
     canvas = wx.createCanvas();
-   
+
     let sys = wx.getWindowInfo();
     screenWidth = sys.screenWidth;
     screenHeight = sys.screenHeight;
@@ -1158,7 +1319,7 @@ function init() {
 
     ctx.fillStyle = '#ff0000';
     ctx.fillRect(0, 0, screenWidth, screenHeight);
-    
+
     // 在控制台输出尺寸信息
     console.log(`画布尺寸: ${canvas.width} x ${canvas.height}`);
     console.log(`窗口信息: 宽=${screenWidth}, 高=${screenHeight}`);
@@ -1167,20 +1328,20 @@ function init() {
     calculateDynamicSizes();
 
     BASE_MIN_X = PAD_LEFT + GRID_STEP / 2;
-    BASE_MIN_Y = PAD_TOP + GRID_STEP ;
+    BASE_MIN_Y = PAD_TOP + GRID_STEP;
     BASE_MAX_X = BASE_MIN_X + (COLS - 1) * GRID_STEP;
     BASE_MAX_Y = BASE_MIN_Y + (ROWS - 1) * GRID_STEP;
-    
+
     MIN_X = BASE_MIN_X - CARD_SIZE;
     MAX_X = BASE_MAX_X + CARD_SIZE;
     MIN_Y = PAD_TOP;
     MAX_Y = BASE_MAX_Y + CARD_SIZE + 100;
     console.log(`邏輯坐標範圍: X(${MIN_X} ~ ${MAX_X}), Y(${MIN_Y} ~ ${MAX_Y})`);
     BASE_POSITIONS = generateBaseGrid();
-    
+
     // 自動計算縮放比例以適應螢幕
-    let logicWidth = MAX_X - MIN_X ;
-    let logicHeight = MAX_Y ;
+    let logicWidth = MAX_X - MIN_X;
+    let logicHeight = MAX_Y;
     let scaleX = screenWidth / logicWidth;
     let scaleY = screenHeight / logicHeight;
     cardScale = Math.min(scaleX, scaleY) * 0.92;
@@ -1199,11 +1360,13 @@ function init() {
     console.log("==================================");
 
     initAudio();
-    
+
     loadCardImages().then(() => {
-        loadLevel(1);
+        totalScore = 0;
+        currentRoundScore = 0;
+        loadLevel(1, false);
     });
-    
+
     wx.onTouchStart(onTouchStart);
     wx.onTouchEnd(onTouchEnd);
 
@@ -1214,39 +1377,39 @@ function init() {
     }
     frame();
 
-    }
+}
 function drawDebugBounds(ctx) {
     // BASE 範圍（基礎網格邊界）- 藍色虛線框
     ctx.strokeStyle = 'rgba(0, 100, 255, 0.6)';
     ctx.lineWidth = 1.5 / cardScale;
     ctx.setLineDash([8, 4]);
-    
-    const baseLeft = BASE_MIN_X - CARD_SIZE/2;
-    const baseTop = BASE_MIN_Y - CARD_SIZE/2;
+
+    const baseLeft = BASE_MIN_X - CARD_SIZE / 2;
+    const baseTop = BASE_MIN_Y - CARD_SIZE / 2;
     const baseWidth = BASE_MAX_X - BASE_MIN_X + CARD_SIZE;
     const baseHeight = BASE_MAX_Y - BASE_MIN_Y + CARD_SIZE;
-    
+
     ctx.strokeRect(baseLeft, baseTop, baseWidth, baseHeight);
-    
+
     // 添加標籤
     ctx.fillStyle = 'rgba(0, 100, 255, 0.8)';
     ctx.font = `bold ${11 / cardScale}px "Segoe UI"`;
     ctx.fillText('BASE', baseLeft + 5, baseTop - 5);
-    
+
     // MIN/MAX 範圍（擴展邊界）- 紅色實線框
     ctx.strokeStyle = 'rgba(255, 50, 50, 0.6)';
     ctx.lineWidth = 2 / cardScale;
     ctx.setLineDash([]);
     ctx.strokeRect(MIN_X, MIN_Y, MAX_X - MIN_X, MAX_Y - MIN_Y);
-    
+
     // 添加標籤和坐標
     ctx.fillStyle = 'rgba(255, 50, 50, 0.8)';
     ctx.fillText('MIN/MAX', MIN_X + 5, MIN_Y - 5);
-    
+
     // 四角坐標標註
     const fontSize = `${10 / cardScale}px "Segoe UI"`;
     ctx.font = fontSize;
-    
+
     // 左上角
     ctx.fillText(`(${MIN_X.toFixed(0)},${MIN_Y.toFixed(0)})`, MIN_X + 5, MIN_Y + 15);
     // 右上角
@@ -1256,6 +1419,6 @@ function drawDebugBounds(ctx) {
     // 右下角
     ctx.fillText(`(${MAX_X.toFixed(0)},${MAX_Y.toFixed(0)})`, MAX_X - 70, MAX_Y - 5);
 
-    ctx.fillText(`CARD_SIZE: ${CARD_SIZE}px`, 500,500);
+    ctx.fillText(`CARD_SIZE: ${CARD_SIZE}px`, 500, 500);
 }
 init();
