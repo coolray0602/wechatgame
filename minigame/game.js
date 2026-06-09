@@ -37,12 +37,17 @@ let SCORE_FONT_SIZE, SCORE_TEXT_X, SCORE_TEXT_Y;
 let INFO_FONT_SIZE;
 let REMAIN_TEXT_X, REMAIN_TEXT_Y;
 
+
+// 添加按钮之间的间距变量
+const BTN_GAP = 20; // 两个按钮之间的间距
+
 // ✅ 新增：關卡按鈕數組
 let levelButtons1 = [];
 let levelButtons2 = [];
 
 // ==================== 累積總分（跨關卡） ====================
 let totalScore = 0;
+// 在 calculateDynamicSizes 函数末尾添加按钮位置计算
 function calculateDynamicSizes() {
     const sys = wx.getSystemInfoSync();
     const screenWidth = sys.screenWidth;
@@ -68,7 +73,6 @@ function calculateDynamicSizes() {
     const BASE_TITLE_X = 20;
     const BASE_TITLE_Y = 40;
 
-    // ❌ 删除 const，改为全局变量（不加任何关键字）
     TITLE_WIDTH = Math.round(BASE_TITLE_WIDTH * scaleFactor / 3);
     TITLE_HEIGHT = Math.round(BASE_TITLE_HEIGHT * scaleFactor / 3);
     TITLE_X = Math.round(BASE_TITLE_X * scaleFactor);
@@ -107,6 +111,34 @@ function calculateDynamicSizes() {
 
     REMAIN_TEXT_X = COIN_X + Math.round(8 * scaleFactor);
     REMAIN_TEXT_Y = SCORE_BG_Y + Math.round(SCORE_BG_HEIGHT * 1.65);
+
+    // === 新增：计算重来和洗牌按钮的位置（屏幕坐标系，底部向上20px）===
+    const BTN_WIDTH = Math.round(95 * scaleFactor);
+    const BTN_HEIGHT = Math.round(42 * scaleFactor);
+    const BTN_FROM_BOTTOM = 20; // 距离底部20px
+
+    // 计算两个按钮的总宽度
+    const totalButtonsWidth = BTN_WIDTH * 2 + BTN_GAP;
+    // 计算起始X位置（居中）
+    const startX = (screenWidth - totalButtonsWidth) / 2;
+
+    // 洗牌按钮（左边）
+    shuffleBtnRect = {
+        x: startX,
+        y: screenHeight - BTN_HEIGHT - BTN_FROM_BOTTOM,
+        w: BTN_WIDTH,
+        h: BTN_HEIGHT
+    };
+
+    // 重来按钮（右边）
+    resetBtnRect = {
+        x: startX + BTN_WIDTH + BTN_GAP,
+        y: screenHeight - BTN_HEIGHT - BTN_FROM_BOTTOM,
+        w: BTN_WIDTH,
+        h: BTN_HEIGHT
+    };
+
+    console.log(`按钮位置 - 洗牌: (${shuffleBtnRect.x}, ${shuffleBtnRect.y}), 重来: (${resetBtnRect.x}, ${resetBtnRect.y})`);
 }
 
 function generateForbiddenPositions(level) {
@@ -197,6 +229,7 @@ let screenWidth, screenHeight;
 let offsetX = 0, offsetY = 0;
 let cardScale = 1;
 
+// 在全局变量区域添加新的按钮矩形变量（替换原来的）
 let resetBtnRect = { x: 0, y: 0, w: 95, h: 42 };
 let shuffleBtnRect = { x: 0, y: 0, w: 95, h: 42 };
 let settingsBtnRect = { x: 0, y: 0, w: 80, h: 35 };
@@ -287,7 +320,7 @@ function switchBgm() {
 function loadCardImages() {
     return new Promise((resolve) => {
         let loadedCount = 0;
-        const totalImages = CARD_KEYS.length + 2; // +2 為標題圖片和金幣圖片
+        const totalImages = CARD_KEYS.length + 3; // +3 為標題圖片、金幣圖片和齒輪圖標
 
         // 載入標題圖片
         const titleImg = wx.createImage();
@@ -308,7 +341,8 @@ function loadCardImages() {
                 resolve();
             }
         };
-        // 載入金幣圖片 (新增)
+
+        // 載入金幣圖片
         const coinImg = wx.createImage();
         coinImg.src = 'images/coin.png';
         coinImg.onload = () => {
@@ -322,7 +356,23 @@ function loadCardImages() {
             loadedImages['coin'] = null;
             if (loadedCount === totalImages) resolve();
         };
-        // 載入卡牌圖片（原有程式碼）
+
+        // 載入齒輪圖標（設定按鈕）
+        const gearImg = wx.createImage();
+        gearImg.src = 'images/gear.png';
+        gearImg.onload = () => {
+            loadedCount++;
+            loadedImages['gear'] = gearImg;
+            if (loadedCount === totalImages) resolve();
+        };
+        gearImg.onerror = (err) => {
+            console.error('載入齒輪圖片失敗:', err);
+            loadedCount++;
+            loadedImages['gear'] = null;
+            if (loadedCount === totalImages) resolve();
+        };
+
+        // 載入卡牌圖片
         for (let key of CARD_KEYS) {
             const img = wx.createImage();
             img.src = `images/${CARD_IMAGES[key]}`;
@@ -566,11 +616,11 @@ function checkGameEnd() {
     let remaining = stackCards.filter(c => !c.removed).length;
     if (remaining === 0 && slotCards.length === 0 && gameActive) {
         gameActive = false;
-        
+
         // ★ 將當前關卡分數累加到總分
         totalScore += currentRoundScore;
         currentRoundScore = 0;  // 重置當前關卡分數
-        
+
         if (currentLevel < TOTAL_LEVELS) {
             wx.showModal({
                 title: `🎉 第${currentLevel}關通關！`,
@@ -613,7 +663,7 @@ function checkGameEnd() {
         for (let v of cnt.values()) if (v >= 3) can = true;
         if (!can) {
             gameActive = false;
-            
+
             // 失敗時，不保留當前關卡分數（總分不變）
             // 可選：顯示失敗提示
             wx.showModal({
@@ -743,7 +793,7 @@ function onCardClick(card) {
 // keepTotalScore: 是否保留總分（通關時 true，重玩關卡或切換關卡時 false 或看情況）
 function loadLevel(level, keepTotalScore = false) {
     currentLevel = level;
-    
+
     if (!keepTotalScore) {
         // 切換關卡或重玩時，如果不保留當前關卡分數，則只重置 currentRoundScore
         // totalScore 保持不變（從之前關卡累積來的）
@@ -752,7 +802,7 @@ function loadLevel(level, keepTotalScore = false) {
         currentRoundScore = 0;
     }
     // 如果 keepTotalScore === true，表示通關後進入下一關，此時 totalScore 已經累加，currentRoundScore 已歸零
-    
+
     forbiddenPositions = generateForbiddenPositions(level);
 
     nextCardId = 1;
@@ -910,15 +960,6 @@ function renderUI() {
     const subtitleFontSize = Math.max(16, Math.round(20 * (CARD_SIZE / BASE_CARD_SIZE)));
     const scoreFontSize = Math.max(18, Math.round(50 * (CARD_SIZE / BASE_CARD_SIZE)));
 
-    // 設定按鈕
-    ctx.fillStyle = '#ffdd99';
-    roundRect(ctx, 25, 140, 80, 35, 18);
-    ctx.fill();
-    ctx.fillStyle = '#4f2d0a';
-
-    ctx.fillText('⚙️', 35, 163);
-    settingsBtnRect = { x: 25, y: 140, w: 80, h: 35 };
-
     // 繪製卡牌
     let sorted = [...stackCards].sort((a, b) => a.layer - b.layer);
     for (let c of sorted) {
@@ -985,31 +1026,28 @@ function renderUI() {
         drawCard(ctx, card, x, y, scale, 1, true, rotation);
     }
 
-    // 按鈕
-    let btnY = slotY + 72 + BTN_Y_OFFSET;
+    ctx.restore();
+    // === 绘制底部按钮（屏幕坐标系）===
     const buttonFontSize = Math.max(14, Math.round(18 * (CARD_SIZE / BASE_CARD_SIZE)));
 
+    // 洗牌按钮
     ctx.fillStyle = '#ffdd99';
-    roundRect(ctx, 100, btnY, 95, 42, 35);
+    roundRect(ctx, shuffleBtnRect.x, shuffleBtnRect.y, shuffleBtnRect.w, shuffleBtnRect.h, 35);
     ctx.fill();
     ctx.fillStyle = '#4f2d0a';
     ctx.font = `bold ${buttonFontSize}px "Segoe UI"`;
-    ctx.fillText('♻️ 洗牌', 115, btnY + 30);
+    ctx.fillText('♻️ 洗牌', shuffleBtnRect.x + 15, shuffleBtnRect.y + shuffleBtnRect.h * 0.7);
     ctx.font = `bold ${Math.max(10, Math.round(12 * (CARD_SIZE / BASE_CARD_SIZE)))}px "Segoe UI"`;
     ctx.fillStyle = '#b16224';
-    ctx.fillText(`x${shuffleRemainingCount}`, 178, btnY + 25);
-    shuffleBtnRect = { x: 100, y: btnY, w: 95, h: 42 };
+    ctx.fillText(`x${shuffleRemainingCount}`, shuffleBtnRect.x + shuffleBtnRect.w - 20, shuffleBtnRect.y + shuffleBtnRect.h * 0.6);
 
+    // 重来按钮
     ctx.fillStyle = '#ffdd99';
-    roundRect(ctx, 215, btnY, 95, 42, 35);
+    roundRect(ctx, resetBtnRect.x, resetBtnRect.y, resetBtnRect.w, resetBtnRect.h, 35);
     ctx.fill();
     ctx.fillStyle = '#4f2d0a';
     ctx.font = `bold ${buttonFontSize}px "Segoe UI"`;
-    ctx.fillText('🔄 重來', 230, btnY + 30);
-    resetBtnRect = { x: 215, y: btnY, w: 95, h: 42 };
-
-    ctx.restore();
-    
+    ctx.fillText('🔄 重來', resetBtnRect.x + 15, resetBtnRect.y + resetBtnRect.h * 0.7);
     // === 繪製右上角得分面板（在螢幕坐標系，不受遊戲縮放影響）===
     const coinImg = loadedImages['coin'];
     const displayScore = getDisplayScore();  // 獲取總分顯示
@@ -1043,12 +1081,36 @@ function renderUI() {
 
     // === 新增：在第幾關文字（放在剩餘卡牌下方）===
     // 動態計算關卡文字的位置和大小（基於剩餘卡牌文字的位置）
-   
+
     const levelTextY = REMAIN_TEXT_Y + Math.round(INFO_FONT_SIZE * 1.3);
     const levelTextX = REMAIN_TEXT_X;
 
     ctx.fillStyle = colors.subtitleText;
     ctx.fillText(`第 ${currentLevel} / ${TOTAL_LEVELS} 關`, levelTextX, levelTextY);
+
+    // === 設定按鈕（使用圖片，放在關卡文字的右邊，距離右側10px）===
+    const gearImg = loadedImages['gear'];
+    const gearSize = 30;//Math.min(30, Math.round(window.INFO_FONT_SIZE * 1.5)); // 設定按鈕大小
+
+    // 計算位置：放在關卡文字右側，距離屏幕右邊緣10px
+    const gearX = screenWidth - gearSize - 20;
+    const gearY = REMAIN_TEXT_Y - gearSize + 8; // 與關卡文字對齊
+
+    if (gearImg && gearImg.complete) {
+        ctx.drawImage(gearImg, gearX, gearY, gearSize, gearSize);
+    } else {
+        // 備案：如果圖片載入失敗，顯示文字按鈕
+        ctx.fillStyle = '#ffdd99';
+        roundRect(ctx, gearX, gearY, gearSize, gearSize, 8);
+        ctx.fill();
+        ctx.fillStyle = '#4f2d0a';
+        ctx.font = `${Math.round(gearSize * 0.6)}px "Segoe UI"`;
+        ctx.fillText('⚙️', gearX + gearSize * 0.2, gearY + gearSize * 0.75);
+    }
+
+    // 更新設定按鈕的觸摸區域
+    settingsBtnRect = { x: gearX, y: gearY, w: gearSize, h: gearSize };
+
 
     // === 繪製標題圖片（隨螢幕縮放） ===
     const titleImg = loadedImages['title'];
@@ -1197,10 +1259,10 @@ function renderUI() {
 // ==================== 觸摸事件 ====================
 function onTouchStart(e) {
     let t = e.touches[0];
-    let x = (t.clientX - offsetX) / cardScale;
-    let y = (t.clientY - offsetY) / cardScale;
+    let x = t.clientX;  // 直接使用屏幕坐標
+    let y = t.clientY;  // 直接使用屏幕坐標
 
-    // 檢查設定面板內的點擊
+    // 檢查設定面板內的點擊（使用屏幕坐標）
     if (settingsVisible) {
         const panelWidth = Math.min(280, screenWidth * 0.8);
         const panelHeight = Math.min(320, screenHeight * 0.6);
@@ -1211,8 +1273,8 @@ function onTouchStart(e) {
         const closeBtnSize = Math.min(30, panelWidth * 0.1);
         const closeX = panelX + panelWidth - closeBtnSize - 10;
         const closeY = panelY + 10;
-        if (x * cardScale + offsetX >= closeX && x * cardScale + offsetX <= closeX + closeBtnSize &&
-            y * cardScale + offsetY >= closeY && y * cardScale + offsetY <= closeY + closeBtnSize) {
+        if (x >= closeX && x <= closeX + closeBtnSize &&
+            y >= closeY && y <= closeY + closeBtnSize) {
             settingsVisible = false;
             return;
         }
@@ -1222,8 +1284,8 @@ function onTouchStart(e) {
         const bgmBtnY = panelY + panelHeight * 0.24;
         const bgmBtnW = panelWidth * 0.2;
         const bgmBtnH = panelHeight * 0.09;
-        if (x * cardScale + offsetX >= bgmBtnX && x * cardScale + offsetX <= bgmBtnX + bgmBtnW &&
-            y * cardScale + offsetY >= bgmBtnY && y * cardScale + offsetY <= bgmBtnY + bgmBtnH) {
+        if (x >= bgmBtnX && x <= bgmBtnX + bgmBtnW &&
+            y >= bgmBtnY && y <= bgmBtnY + bgmBtnH) {
             toggleBgm();
             return;
         }
@@ -1231,8 +1293,8 @@ function onTouchStart(e) {
         // 切換BGM按鈕
         const switchBgmX = panelX + panelWidth * 0.72;
         const switchBgmY = panelY + panelHeight * 0.35;
-        if (x * cardScale + offsetX >= switchBgmX && x * cardScale + offsetX <= switchBgmX + bgmBtnW &&
-            y * cardScale + offsetY >= switchBgmY && y * cardScale + offsetY <= switchBgmY + bgmBtnH) {
+        if (x >= switchBgmX && x <= switchBgmX + bgmBtnW &&
+            y >= switchBgmY && y <= switchBgmY + bgmBtnH) {
             switchBgm();
             return;
         }
@@ -1240,17 +1302,17 @@ function onTouchStart(e) {
         // 點擊音效開關按鈕
         const sfxBtnX = panelX + panelWidth * 0.72;
         const sfxBtnY = panelY + panelHeight * 0.46;
-        if (x * cardScale + offsetX >= sfxBtnX && x * cardScale + offsetX <= sfxBtnX + bgmBtnW &&
-            y * cardScale + offsetY >= sfxBtnY && y * cardScale + offsetY <= sfxBtnY + bgmBtnH) {
+        if (x >= sfxBtnX && x <= sfxBtnX + bgmBtnW &&
+            y >= sfxBtnY && y <= sfxBtnY + bgmBtnH) {
             toggleSfx();
             return;
         }
 
         // 關卡按鈕行1
-        if (levelButtons1) {
-            for (let btn of levelButtons1) {
-                if (x * cardScale + offsetX >= btn.x && x * cardScale + offsetX <= btn.x + btn.w &&
-                    y * cardScale + offsetY >= btn.y && y * cardScale + offsetY <= btn.y + btn.h) {
+        if (window.levelButtons1) {
+            for (let btn of window.levelButtons1) {
+                if (x >= btn.x && x <= btn.x + btn.w &&
+                    y >= btn.y && y <= btn.y + btn.h) {
                     selectLevel(btn.level);
                     return;
                 }
@@ -1258,10 +1320,10 @@ function onTouchStart(e) {
         }
 
         // 關卡按鈕行2
-        if (levelButtons2) {
-            for (let btn of levelButtons2) {
-                if (x * cardScale + offsetX >= btn.x && x * cardScale + offsetX <= btn.x + btn.w &&
-                    y * cardScale + offsetY >= btn.y && y * cardScale + offsetY <= btn.y + btn.h) {
+        if (window.levelButtons2) {
+            for (let btn of window.levelButtons2) {
+                if (x >= btn.x && x <= btn.x + btn.w &&
+                    y >= btn.y && y <= btn.y + btn.h) {
                     selectLevel(btn.level);
                     return;
                 }
@@ -1269,9 +1331,25 @@ function onTouchStart(e) {
         }
         return;
     }
+    // 检查屏幕坐标系下的按钮（不需要坐标转换）
+    // 检查洗牌按钮
+    if (shuffleBtnRect &&
+        x >= shuffleBtnRect.x && x <= shuffleBtnRect.x + shuffleBtnRect.w &&
+        y >= shuffleBtnRect.y && y <= shuffleBtnRect.y + shuffleBtnRect.h) {
+        shuffleRemaining();
+        return;
+    }
 
-    // 檢查設定按鈕
-    if (x >= settingsBtnRect.x && x <= settingsBtnRect.x + settingsBtnRect.w &&
+    // 检查重来按钮
+    if (resetBtnRect &&
+        x >= resetBtnRect.x && x <= resetBtnRect.x + resetBtnRect.w &&
+        y >= resetBtnRect.y && y <= resetBtnRect.y + resetBtnRect.h) {
+        resetGame();
+        return;
+    }
+    // 檢查設定按鈕（使用屏幕坐標，不需要轉換）
+    if (settingsBtnRect &&
+        x >= settingsBtnRect.x && x <= settingsBtnRect.x + settingsBtnRect.w &&
         y >= settingsBtnRect.y && y <= settingsBtnRect.y + settingsBtnRect.h) {
         toggleSettings();
         return;
@@ -1279,11 +1357,16 @@ function onTouchStart(e) {
 
     if (!gameActive) return;
 
+    // 轉換遊戲坐標（用於點擊卡牌）
+    let gameX = (x - offsetX) / cardScale;
+    let gameY = (y - offsetY) / cardScale;
+
+    // 點擊卡牌
     let sorted = [...stackCards].filter(c => !c.removed && !c.isAnimating).sort((a, b) => b.layer - a.layer);
     for (let card of sorted) {
         let left = card.x - CARD_SIZE / 2, right = card.x + CARD_SIZE / 2;
         let top = card.y - CARD_SIZE / 2, bottom = card.y + CARD_SIZE / 2;
-        if (x >= left && x <= right && y >= top && y <= bottom) {
+        if (gameX >= left && gameX <= right && gameY >= top && gameY <= bottom) {
             if (card.clickable) onCardClick(card);
             break;
         }
@@ -1292,18 +1375,31 @@ function onTouchStart(e) {
 
 function onTouchEnd(e) {
     let t = e.changedTouches[0];
-    let x = (t.clientX - offsetX) / cardScale;
-    let y = (t.clientY - offsetY) / cardScale;
 
+    // 如果設定面板打開，不處理遊戲按鈕
     if (settingsVisible) return;
 
-    if (x >= shuffleBtnRect.x && x <= shuffleBtnRect.x + shuffleBtnRect.w &&
-        y >= shuffleBtnRect.y && y <= shuffleBtnRect.y + shuffleBtnRect.h) {
-        shuffleRemaining();
+    // 使用屏幕坐標
+    let x = t.clientX;
+    let y = t.clientY;
+
+    // 轉換遊戲坐標
+    let gameX = (x - offsetX) / cardScale;
+    let gameY = (y - offsetY) / cardScale;
+
+    // 檢查洗牌和重來按鈕
+    if (shuffleBtnRect &&
+        gameX >= shuffleBtnRect.x && gameX <= shuffleBtnRect.x + shuffleBtnRect.w &&
+        gameY >= shuffleBtnRect.y && gameY <= shuffleBtnRect.y + shuffleBtnRect.h) {
+        // 已經在 onTouchStart 中處理，避免重複
+        return;
     }
-    if (x >= resetBtnRect.x && x <= resetBtnRect.x + resetBtnRect.w &&
-        y >= resetBtnRect.y && y <= resetBtnRect.y + resetBtnRect.h) {
-        resetGame();
+
+    if (resetBtnRect &&
+        gameX >= resetBtnRect.x && gameX <= resetBtnRect.x + resetBtnRect.w &&
+        gameY >= resetBtnRect.y && gameY <= resetBtnRect.y + resetBtnRect.h) {
+        // 已經在 onTouchStart 中處理，避免重複
+        return;
     }
 }
 
