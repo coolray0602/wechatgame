@@ -1,7 +1,7 @@
 let DEBUG_SHOW_AREA_LINES = true; // 設置為 false 可關閉調試虛線
 
 // ==================== 可調整參數（基礎值，會根據螢幕大小自動調整） ====================
-const BASE_CARD_SIZE = 65;
+const BASE_CARD_SIZE = 60;
 const COLS = 6;
 const ROWS = 7;
 
@@ -55,54 +55,68 @@ function calculateDynamicSizes() {
     const screenHeight = sys.screenHeight;
 
     // 定義百分比佈局區域
-    const TOP_AREA_HEIGHT = screenHeight * 0.20;    // 上方 20%：標題、分數、關卡
-    const MIDDLE_AREA_HEIGHT = screenHeight * 0.60;  // 中間 60%：卡牌、卡槽
-    const BOTTOM_AREA_HEIGHT = screenHeight * 0.20;  // 下方 20%：按鈕
+    const TOP_AREA_HEIGHT = screenHeight * 0.20;
+    const MIDDLE_AREA_HEIGHT = screenHeight * 0.60;
+    const BOTTOM_AREA_HEIGHT = screenHeight * 0.20;
+    const MIDDLE_AREA_START = TOP_AREA_HEIGHT;
 
-    // 根據螢幕寬度計算縮放比例
-    const scaleFactor = Math.min(screenWidth / 375, screenHeight / 667);
+    // 根據卡牌網格計算所需空間
+    const gridWidth = (COLS + 1) * BASE_CARD_SIZE;
+    const gridHeight = (ROWS + 1) * BASE_CARD_SIZE;
 
+    // 卡槽高度為 CARD_SIZE 的兩倍
+    const slotHeight = BASE_CARD_SIZE * 2;
+    const extraPadding = 20; // 額外邊距
+
+    // 計算卡牌+卡槽的總所需高度
+    const totalContentHeightNeeded = gridHeight + slotHeight + extraPadding;
+
+    // 計算縮放比例（基於高度）
+    let scaleFactor = MIDDLE_AREA_HEIGHT / totalContentHeightNeeded;
+
+    // 同時考慮寬度限制
+    const gridWidthNeeded = gridWidth + BASE_CARD_SIZE;
+    const scaleFactorForWidth = screenWidth / gridWidthNeeded;
+    scaleFactor = Math.min(scaleFactor, scaleFactorForWidth, 1.0);
+
+    // 應用縮放
     CARD_SIZE = Math.round(BASE_CARD_SIZE * scaleFactor);
     GRID_STEP = CARD_SIZE;
     HALF_SHIFT = CARD_SIZE / 2;
 
-    // 計算卡牌+卡槽的總高度
-    const totalGridHeight = ROWS * GRID_STEP + CARD_SIZE; // 網格總高度
-    const slotHeight = 60 * scaleFactor; // 卡槽高度
-    const totalContentHeight = totalGridHeight + slotHeight + 40; // 加一些邊距
-    
-    // 計算在中間區域垂直居中的起始位置
-    const MIDDLE_AREA_START = TOP_AREA_HEIGHT;
-    const MIDDLE_AREA_END = TOP_AREA_HEIGHT + MIDDLE_AREA_HEIGHT;
-    const contentStartY = MIDDLE_AREA_START + (MIDDLE_AREA_HEIGHT - totalContentHeight) / 2;
+    // 計算縮放後的實際尺寸
+    const actualGridWidth = COLS * GRID_STEP;
+    const actualGridHeight = ROWS * GRID_STEP;
+    const actualSlotHeight = CARD_SIZE * 2;
+    const actualTotalHeight = actualGridHeight + actualSlotHeight + extraPadding;
 
-    // PAD_LEFT 保持不變（水平居中在後面處理）
-    PAD_LEFT = Math.round(30 * scaleFactor);
-    
-    // PAD_TOP 設置為內容起始位置
-    PAD_TOP = contentStartY;
+    // 水平居中
+    PAD_LEFT = (screenWidth - actualGridWidth) / 2;
 
-    // 卡槽位置（在網格下方）
-    SLOT_X_OFFSET = Math.round(-20 * scaleFactor);
-    SLOT_Y_OFFSET = totalGridHeight - GRID_STEP + Math.round(40 * scaleFactor);
+    // 垂直居中在中間區域
+    PAD_TOP = MIDDLE_AREA_START + (MIDDLE_AREA_HEIGHT - actualTotalHeight) / 2;
+
+    // 卡槽位置（固定在中间区域底部）
+    const BOTTOM_AREA_START = screenHeight * 0.20 + screenHeight * 0.60; // 中间区域底部
+    SLOT_X_OFFSET = 0;  // 水平不需要額外偏移，因為 PAD_LEFT 已經處理了居中
+    SLOT_Y_OFFSET = BOTTOM_AREA_START - PAD_TOP - (CARD_SIZE * 2) - 10;  // 中间区域底部 - 卡槽高度 - 10px边距
     BTN_Y_OFFSET = 0;
 
-    // === 標題圖片動態尺寸（上方20%區域內）===
+    // === 標題圖片動態尺寸 ===
     const titleAreaWidth = screenWidth * 0.8;
-    const titleAspectRatio = 528 / 200; // 原始圖片寬高比
-    
+    const titleAspectRatio = 528 / 200;
+
     TITLE_WIDTH = Math.min(titleAreaWidth, Math.round(screenWidth * 0.7));
     TITLE_HEIGHT = Math.round(TITLE_WIDTH / titleAspectRatio);
-    TITLE_X = (screenWidth - TITLE_WIDTH) / 2; // 水平居中
-    TITLE_Y = TOP_AREA_HEIGHT * 0.1; // 上方區域頂部
+    TITLE_X = (screenWidth - TITLE_WIDTH) / 2;
+    TITLE_Y = TOP_AREA_HEIGHT * 0.1;
 
-    // === 金幣圖片動態尺寸與位置（右上角，上方20%區域內）===
+    // === 金幣圖片動態尺寸與位置 ===
     const coinScale = scaleFactor * 0.45;
-    
+
     COIN_WIDTH = Math.round(100 * coinScale);
     COIN_HEIGHT = Math.round(127 * coinScale);
 
-    // 獲取膠囊按鈕位置資訊（微信小遊戲的膠囊按鈕）
     const menuButtonInfo = wx.getMenuButtonBoundingClientRect();
     const menuButtonBottom = menuButtonInfo.bottom;
 
@@ -127,19 +141,16 @@ function calculateDynamicSizes() {
     REMAIN_TEXT_X = COIN_X + Math.round(8 * scaleFactor);
     REMAIN_TEXT_Y = SCORE_BG_Y + Math.round(SCORE_BG_HEIGHT * 1.65);
 
-    // === 底部按鈕位置（下方20%區域內）===
+    // === 底部按鈕位置 ===
     const BTN_WIDTH = Math.round(95 * scaleFactor);
     const BTN_HEIGHT = Math.round(42 * scaleFactor);
-    
-    // 按鈕垂直居中在下方20%區域
-    const BOTTOM_AREA_START = TOP_AREA_HEIGHT + MIDDLE_AREA_HEIGHT;
+
+
     const BTN_CENTER_Y = BOTTOM_AREA_START + (BOTTOM_AREA_HEIGHT / 2) - (BTN_HEIGHT / 2);
 
-    // 計算兩個按鈕的總寬度，水平居中
     const totalButtonsWidth = BTN_WIDTH * 2 + BTN_GAP;
     const startX = (screenWidth - totalButtonsWidth) / 2;
 
-    // 洗牌按鈕（左邊）
     shuffleBtnRect = {
         x: startX,
         y: BTN_CENTER_Y,
@@ -147,7 +158,6 @@ function calculateDynamicSizes() {
         h: BTN_HEIGHT
     };
 
-    // 重來按鈕（右邊）
     resetBtnRect = {
         x: startX + BTN_WIDTH + BTN_GAP,
         y: BTN_CENTER_Y,
@@ -155,9 +165,15 @@ function calculateDynamicSizes() {
         h: BTN_HEIGHT
     };
 
-    console.log(`佈局計算 - 內容起始Y: ${contentStartY}, 總內容高度: ${totalContentHeight}`);
-    console.log(`佈局區域 - 上方: 0-${TOP_AREA_HEIGHT}px, 中間: ${TOP_AREA_HEIGHT}-${TOP_AREA_HEIGHT + MIDDLE_AREA_HEIGHT}px, 下方: ${TOP_AREA_HEIGHT + MIDDLE_AREA_HEIGHT}-${screenHeight}px`);
-    console.log(`按鈕位置 - 洗牌: (${shuffleBtnRect.x}, ${shuffleBtnRect.y}), 重來: (${resetBtnRect.x}, ${resetBtnRect.y})`);
+    console.log(`========== 動態尺寸計算 ==========`);
+    console.log(`螢幕尺寸: ${screenWidth}x${screenHeight}`);
+    console.log(`縮放比例: ${scaleFactor}, 卡牌大小: ${CARD_SIZE}`);
+    console.log(`網格區域: ${actualGridWidth}x${actualGridHeight}`);
+    console.log(`PAD_LEFT: ${PAD_LEFT}, PAD_TOP: ${PAD_TOP}`);
+    console.log(`卡槽偏移: (${SLOT_X_OFFSET}, ${SLOT_Y_OFFSET})`);
+    console.log(`中間區域: Y=${MIDDLE_AREA_START} 到 ${MIDDLE_AREA_START + MIDDLE_AREA_HEIGHT}`);
+    console.log(`內容範圍: Y=${PAD_TOP} 到 ${PAD_TOP + actualTotalHeight}`);
+    console.log(`=================================`);
 }
 function generateForbiddenPositions(level) {
     const forbiddenCount = 10 + (level - 1) * 3;
@@ -794,14 +810,15 @@ function onCardClick(card) {
     if (!gameActive || !card.clickable) return;
     if (card.isAnimating) return;
 
-    const scaleFactor = CARD_SIZE / BASE_CARD_SIZE;
-    const slotX = (20 + SLOT_X_OFFSET) * scaleFactor;
-    const slotY = MAX_Y - 60;
+    // 計算卡槽中目標卡牌的位置
+    const slotX = PAD_LEFT;  // 卡槽左邊界
+    const slotY = PAD_TOP + SLOT_Y_OFFSET;  // 卡槽Y位置
+    const slotSpacing = (COLS * GRID_STEP) / 7;  // 每個槽位的間距
 
     const targetSlotIndex = slotCards.length;
-    const targetX = slotX + 12 + targetSlotIndex * 52;
-    const targetY = slotY;
-    console.log("slotY=" + slotY + " , targetY=" + targetY + " , MAX_Y=" + MAX_Y + " , SLOT_Y_OFFSET=" + SLOT_Y_OFFSET + " , scaleFactor=" + scaleFactor);
+    const targetX = slotX + (targetSlotIndex * slotSpacing) + (slotSpacing / 2) - (CARD_SIZE / 2);
+    const targetY = slotY + 8;  // 加上內邊距
+
     const fromX = card.x - CARD_SIZE / 2;
     const fromY = card.y - CARD_SIZE / 2;
 
@@ -914,17 +931,20 @@ function roundRect(ctx, x, y, w, h, r) {
     ctx.quadraticCurveTo(x, y, x + r, y);
     ctx.closePath();
 }
-
 function drawCard(ctx, card, x, y, scale = 1, alpha = 1, isAnimating = false, rotation = 0) {
     const img = loadedImages[card.icon];
     const size = CARD_SIZE * scale;
     const offset = (size - CARD_SIZE) / 2;
 
+    // 計算實際繪製位置（x, y 是卡牌的左上角）
+    let drawX = x - offset;
+    let drawY = y - offset;
+
     ctx.save();
 
     if (rotation > 0) {
-        const centerX = x + size / 2;
-        const centerY = y + size / 2;
+        const centerX = drawX + size / 2;
+        const centerY = drawY + size / 2;
         ctx.translate(centerX, centerY);
         ctx.rotate(rotation);
         ctx.translate(-centerX, -centerY);
@@ -940,20 +960,29 @@ function drawCard(ctx, card, x, y, scale = 1, alpha = 1, isAnimating = false, ro
     ctx.globalAlpha = alpha;
 
     if (img && img.complete) {
-        ctx.drawImage(img, x - offset, y - offset, size, size);
+        ctx.drawImage(img, drawX, drawY, size, size);
     } else {
+        // 繪製卡牌背景
         ctx.fillStyle = '#e8d8c0';
-        ctx.fillRect(x - offset, y - offset, size, size);
-        ctx.font = `${CARD_SIZE * 0.3 * scale}px "Segoe UI"`;
+        ctx.fillRect(drawX, drawY, size, size);
+
+        // 繪製邊框
+        ctx.strokeStyle = '#b97f3a';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(drawX, drawY, size, size);
+
+        // 繪製文字
+        ctx.font = `${Math.max(12, CARD_SIZE * 0.3 * scale)}px "Segoe UI"`;
         ctx.fillStyle = '#5a2f0a';
-        ctx.fillText(card.icon.substring(0, 3), x - offset + 10, y - offset + size - 10);
+        ctx.fillText(card.icon.substring(0, 3), drawX + 10, drawY + size - 10);
     }
 
     ctx.shadowBlur = 0;
 
+    // 如果卡牌不可點擊，添加半透明遮罩
     if (!card.clickable && !card.removed && !isAnimating) {
         ctx.fillStyle = 'rgba(120, 100, 80, 0.3)';
-        roundRect(ctx, x - offset, y - offset, size, size, 8);
+        roundRect(ctx, drawX, drawY, size, size, 8);
         ctx.fill();
     }
 
@@ -962,10 +991,11 @@ function drawCard(ctx, card, x, y, scale = 1, alpha = 1, isAnimating = false, ro
 function renderUI() {
     ctx.clearRect(0, 0, screenWidth, screenHeight);
 
+    // 背景
     ctx.fillStyle = colors.bg;
     ctx.fillRect(0, 0, screenWidth, screenHeight);
 
-    // === 定義百分比區域變數（移到函數頂部，供整個函數使用）===
+    // === 定義百分比區域變數 ===
     const TOP_AREA_HEIGHT = screenHeight * 0.20;
     const MIDDLE_AREA_HEIGHT = screenHeight * 0.60;
     const BOTTOM_AREA_HEIGHT = screenHeight * 0.20;
@@ -974,7 +1004,7 @@ function renderUI() {
 
     // === 繪製三個區域的調試虛線（可開關）===
     if (typeof DEBUG_SHOW_AREA_LINES !== 'undefined' && DEBUG_SHOW_AREA_LINES) {
-        // 上方區域與中間區域的分隔線 - 紅色虛線
+        // 上方區域與中間區域的分隔線
         ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
         ctx.lineWidth = 2;
         ctx.setLineDash([10, 5]);
@@ -983,7 +1013,7 @@ function renderUI() {
         ctx.lineTo(screenWidth, TOP_AREA_HEIGHT);
         ctx.stroke();
 
-        // 中間區域與下方區域的分隔線 - 紅色虛線
+        // 中間區域與下方區域的分隔線
         ctx.beginPath();
         ctx.moveTo(0, BOTTOM_AREA_START);
         ctx.lineTo(screenWidth, BOTTOM_AREA_START);
@@ -996,89 +1026,90 @@ function renderUI() {
         const labelFontSize = Math.max(14, Math.round(16 * (CARD_SIZE / BASE_CARD_SIZE)));
         ctx.font = `bold ${labelFontSize}px "Segoe UI"`;
 
-        // 上方區域標籤
         ctx.fillStyle = 'rgba(255, 0, 0, 0.7)';
         ctx.fillText(`上方 20% (0-${TOP_AREA_HEIGHT}px)`, 10, TOP_AREA_HEIGHT - 5);
-
-        // 中間區域標籤
         ctx.fillText(`中間 60% (${MIDDLE_AREA_START}-${BOTTOM_AREA_START}px)`, 10, MIDDLE_AREA_START + 20);
-
-        // 下方區域標籤
         ctx.fillText(`下方 20% (${BOTTOM_AREA_START}-${screenHeight}px)`, 10, BOTTOM_AREA_START + 20);
 
-        // 區域背景色（半透明，便於調試）
+        // 區域背景色（半透明）
         ctx.fillStyle = 'rgba(255, 200, 200, 0.1)';
-        ctx.fillRect(0, 0, screenWidth, TOP_AREA_HEIGHT); // 上方區域 - 淡紅色
-
+        ctx.fillRect(0, 0, screenWidth, TOP_AREA_HEIGHT);
         ctx.fillStyle = 'rgba(200, 255, 200, 0.1)';
-        ctx.fillRect(0, MIDDLE_AREA_START, screenWidth, MIDDLE_AREA_HEIGHT); // 中間區域 - 淡綠色
-
+        ctx.fillRect(0, MIDDLE_AREA_START, screenWidth, MIDDLE_AREA_HEIGHT);
         ctx.fillStyle = 'rgba(200, 200, 255, 0.1)';
-        ctx.fillRect(0, BOTTOM_AREA_START, screenWidth, BOTTOM_AREA_HEIGHT); // 下方區域 - 淡藍色
+        ctx.fillRect(0, BOTTOM_AREA_START, screenWidth, BOTTOM_AREA_HEIGHT);
     }
 
-    ctx.save();
-    ctx.translate(offsetX, offsetY);
-    ctx.scale(cardScale, cardScale);
-
-    // 繪製除錯邊界
-    drawDebugBounds(ctx);
-
-    // 動態計算字體大小
-    const titleFontSize = Math.max(24, Math.round(32 * (CARD_SIZE / BASE_CARD_SIZE)));
-    const subtitleFontSize = Math.max(16, Math.round(20 * (CARD_SIZE / BASE_CARD_SIZE)));
-    const scoreFontSize = Math.max(18, Math.round(50 * (CARD_SIZE / BASE_CARD_SIZE)));
-
-    // 繪製卡牌
+    // 繪製卡牌（按層級排序，低層級先繪製）
     let sorted = [...stackCards].sort((a, b) => a.layer - b.layer);
     for (let c of sorted) {
         if (c.removed) continue;
         if (c.isAnimating) continue;
-        let x = c.x - CARD_SIZE / 2, y = c.y - CARD_SIZE / 2;
+        let x = c.x - CARD_SIZE / 2;
+        let y = c.y - CARD_SIZE / 2;
         drawCard(ctx, c, x, y, 1, 1, false, 0);
     }
+    // === 繪製卡槽（固定在中间区域底部）===
+    const slotX = PAD_LEFT;
+    const slotWidth = COLS * GRID_STEP;
+    const slotHeight = CARD_SIZE * 2;  // 卡槽高度为两倍卡牌大小
+    const slotY = BOTTOM_AREA_START - slotHeight - 5;  // 固定在底部，留5px边距
 
-    // 繪製卡槽
-    let slotX = 20 + SLOT_X_OFFSET;
-    let slotY = MAX_Y - 40 + SLOT_Y_OFFSET;
-
-    // 確保卡槽在中間區域內
-    if (slotY + 60 > MIDDLE_AREA_START + MIDDLE_AREA_HEIGHT) {
-        slotY = MIDDLE_AREA_START + MIDDLE_AREA_HEIGHT - 60;
-    }
-    let slotWidth = 380;
-    let slotHeight = 60;
-
+    // 繪製卡槽背景
     ctx.fillStyle = colors.slotBg;
-    roundRect(ctx, slotX, slotY, slotWidth, slotHeight, 28);
+    roundRect(ctx, slotX, slotY, slotWidth, slotHeight, 15);
     ctx.fill();
     ctx.strokeStyle = '#b9975a';
+    ctx.lineWidth = 2;
     ctx.stroke();
 
-    // 7個槽位卡片
+    // 計算每個槽位的寬度和起始位置（使用原始卡牌尺寸）
+    const slotSpacing = slotWidth / 7;
+    const cardSlotWidth = CARD_SIZE;  // 保持原始卡牌大小
+    const cardSlotHeight = CARD_SIZE;  // 保持原始卡牌大小
+    const cardSlotY = slotY + (slotHeight - cardSlotHeight) / 2;  // 垂直居中
+
+    // 繪製7個槽位卡片
     for (let i = 0; i < 7; i++) {
-        let sx = slotX + 12 + i * 52;
+        // 計算每個槽位的中心X位置
+        const slotCenterX = slotX + (i * slotSpacing) + (slotSpacing / 2);
+        const cardSlotX = slotCenterX - cardSlotWidth / 2;
+
         if (i < slotCards.length) {
             const iconKey = slotCards[i];
             const img = loadedImages[iconKey];
-            ctx.fillStyle = '#fff3df';
-            roundRect(ctx, sx, slotY + 8, 48, 44, 12);
-            ctx.fill();
 
+            // 繪製卡片背景
+            ctx.fillStyle = '#fff3df';
+            roundRect(ctx, cardSlotX, cardSlotY, cardSlotWidth, cardSlotHeight, 8);
+            ctx.fill();
+            ctx.strokeStyle = '#d4a373';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            // 繪製卡片圖標
             if (img && img.complete) {
-                ctx.drawImage(img, sx + 4, slotY + 10, 40, 40);
+                const iconSize = cardSlotWidth - 4;
+                const iconX = cardSlotX + (cardSlotWidth - iconSize) / 2;
+                const iconY = cardSlotY + (cardSlotHeight - iconSize) / 2;
+                ctx.drawImage(img, iconX, iconY, iconSize, iconSize);
             } else {
-                ctx.font = `22px "Segoe UI"`;
+                ctx.font = `${Math.max(12, cardSlotWidth * 0.3)}px "Segoe UI"`;
                 ctx.fillStyle = '#5a2f0a';
-                ctx.fillText(iconKey.substring(0, 2), sx + 15, slotY + 40);
+                ctx.fillText(iconKey.substring(0, 3), cardSlotX + cardSlotWidth * 0.2, cardSlotY + cardSlotHeight * 0.65);
             }
         } else {
+            // 空槽位
             ctx.fillStyle = '#eeddbb';
-            roundRect(ctx, sx, slotY + 8, 48, 44, 12);
+            roundRect(ctx, cardSlotX, cardSlotY, cardSlotWidth, cardSlotHeight, 8);
             ctx.fill();
-            ctx.font = `22px "Segoe UI"`;
+            ctx.strokeStyle = '#c9b37c';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            ctx.font = `${Math.max(12, cardSlotWidth * 0.3)}px "Segoe UI"`;
             ctx.fillStyle = '#bba46c';
-            ctx.fillText('?', sx + 18, slotY + 40);
+            ctx.fillText('?', cardSlotX + cardSlotWidth * 0.38, cardSlotY + cardSlotHeight * 0.65);
         }
     }
 
@@ -1099,8 +1130,6 @@ function renderUI() {
         }
         drawCard(ctx, card, x, y, scale, 1, true, rotation);
     }
-
-    ctx.restore();
 
     // === 繪製底部按鈕（屏幕坐標系）===
     const buttonFontSize = Math.max(14, Math.round(18 * (CARD_SIZE / BASE_CARD_SIZE)));
@@ -1124,7 +1153,7 @@ function renderUI() {
     ctx.font = `bold ${buttonFontSize}px "Segoe UI"`;
     ctx.fillText('🔄 重來', resetBtnRect.x + 15, resetBtnRect.y + resetBtnRect.h * 0.7);
 
-    // === 繪製右上角得分面板（在螢幕坐標系，不受遊戲縮放影響）===
+    // === 繪製右上角得分面板 ===
     const coinImg = loadedImages['coin'];
     const displayScore = getDisplayScore();
 
@@ -1142,17 +1171,18 @@ function renderUI() {
         ctx.fillText('💰', COIN_X, COIN_Y + COIN_HEIGHT * 0.7);
     }
 
-    // 繪製分數（總分）
+    // 繪製分數
     ctx.font = `bold ${SCORE_FONT_SIZE}px "Segoe UI"`;
     ctx.fillStyle = colors.scoreText;
     ctx.fillText(`${displayScore}`, SCORE_TEXT_X, SCORE_TEXT_Y);
+
     const infoFontSize = Math.max(14, Math.round(INFO_FONT_SIZE * 0.9));
 
     // 繪製剩餘卡片數量
     let remain = stackCards.filter(c => !c.removed && !c.isAnimating).length;
     ctx.font = `${infoFontSize}px "Segoe UI"`;
     ctx.fillStyle = colors.subtitleText;
-    ctx.fillText(`剩馀 ${remain}`, REMAIN_TEXT_X, REMAIN_TEXT_Y);
+    ctx.fillText(`剩餘 ${remain}`, REMAIN_TEXT_X, REMAIN_TEXT_Y);
 
     // 繪製關卡文字
     const levelTextY = REMAIN_TEXT_Y + Math.round(INFO_FONT_SIZE * 1.3);
@@ -1190,7 +1220,7 @@ function renderUI() {
         ctx.fillText('福一下哥', TITLE_X, TITLE_Y + TITLE_HEIGHT * 0.7);
     }
 
-    // 繪製設定面板
+    // === 繪製設定面板 ===
     if (settingsVisible) {
         ctx.fillStyle = 'rgba(0,0,0,0.7)';
         ctx.fillRect(0, 0, screenWidth, screenHeight);
@@ -1265,6 +1295,8 @@ function renderUI() {
         // 關卡按鈕行1 (1-5)
         const levelBtnWidth = Math.min(45, (panelWidth - 40) / 5.5);
         const levelBtnHeight = Math.min(30, panelHeight * 0.1);
+
+        window.levelButtons1 = [];
         for (let i = 0; i < 5; i++) {
             const levelNum = i + 1;
             const btnX = panelX + 20 + i * (levelBtnWidth + 5);
@@ -1276,11 +1308,11 @@ function renderUI() {
             ctx.fillStyle = isCurrent ? '#ffffff' : '#4f2d0a';
             ctx.font = `bold ${Math.min(14, Math.round(levelBtnHeight * 0.5))}px "Segoe UI"`;
             ctx.fillText(`${levelNum}`, btnX + levelBtnWidth * 0.35, btnY + levelBtnHeight * 0.7);
-            if (!levelButtons1) levelButtons1 = [];
-            levelButtons1[i] = { x: btnX, y: btnY, w: levelBtnWidth, h: levelBtnHeight, level: levelNum };
+            window.levelButtons1.push({ x: btnX, y: btnY, w: levelBtnWidth, h: levelBtnHeight, level: levelNum });
         }
 
         // 關卡按鈕行2 (6-10)
+        window.levelButtons2 = [];
         for (let i = 0; i < 5; i++) {
             const levelNum = i + 6;
             const btnX = panelX + 20 + i * (levelBtnWidth + 5);
@@ -1292,8 +1324,7 @@ function renderUI() {
             ctx.fillStyle = isCurrent ? '#ffffff' : '#4f2d0a';
             ctx.font = `bold ${Math.min(14, Math.round(levelBtnHeight * 0.5))}px "Segoe UI"`;
             ctx.fillText(`${levelNum}`, btnX + levelBtnWidth * 0.35, btnY + levelBtnHeight * 0.7);
-            if (!levelButtons2) levelButtons2 = [];
-            levelButtons2[i] = { x: btnX, y: btnY, w: levelBtnWidth, h: levelBtnHeight, level: levelNum };
+            window.levelButtons2.push({ x: btnX, y: btnY, w: levelBtnWidth, h: levelBtnHeight, level: levelNum });
         }
 
         // 關閉按鈕
@@ -1306,6 +1337,7 @@ function renderUI() {
         ctx.fillText('✕', panelX + panelWidth - closeBtnSize, panelY + closeBtnSize * 0.8);
     }
 
+    // 遊戲結束遮罩
     if (!gameActive) {
         ctx.fillStyle = 'rgba(0,0,0,0.6)';
         ctx.fillRect(0, 0, screenWidth, screenHeight);
@@ -1471,57 +1503,37 @@ function init() {
     canvas.height = screenHeight;
     ctx = canvas.getContext('2d');
 
-    ctx.fillStyle = '#ff0000';
-    ctx.fillRect(0, 0, screenWidth, screenHeight);
-
     console.log(`畫布尺寸: ${canvas.width} x ${canvas.height}`);
-    console.log(`窗口信息: 寬=${screenWidth}, 高=${screenHeight}`);
 
     // 計算動態尺寸
     calculateDynamicSizes();
 
-    // 定義百分比區域
-    const TOP_AREA_HEIGHT = screenHeight * 0.20;
-    const MIDDLE_AREA_HEIGHT = screenHeight * 0.60;
-    const MIDDLE_AREA_START = TOP_AREA_HEIGHT;
-
-    // 使用 PAD_TOP 作為網格的起始位置（已在 calculateDynamicSizes 中計算為垂直居中位置）
+    // 直接使用計算好的 PAD_LEFT 和 PAD_TOP
     BASE_MIN_X = PAD_LEFT + GRID_STEP / 2;
-    BASE_MIN_Y = PAD_TOP + GRID_STEP; // 網格從 PAD_TOP + 一個 GRID_STEP 開始
+    BASE_MIN_Y = PAD_TOP + GRID_STEP / 2;  // 修改：從 GRID_STEP/2 開始，讓網格完整顯示
+
     BASE_MAX_X = BASE_MIN_X + (COLS - 1) * GRID_STEP;
     BASE_MAX_Y = BASE_MIN_Y + (ROWS - 1) * GRID_STEP;
 
-    MIN_X = BASE_MIN_X - CARD_SIZE;
-    MAX_X = BASE_MAX_X + CARD_SIZE;
-    MIN_Y = PAD_TOP; // 從內容起始位置開始
-    MAX_Y = BASE_MAX_Y + CARD_SIZE + 60; // 包含卡槽空間
-    
-    console.log(`卡牌區域 - PAD_TOP: ${PAD_TOP}, BASE_MIN_Y: ${BASE_MIN_Y}`);
-    console.log(`邏輯坐標範圍: X(${MIN_X} ~ ${MAX_X}), Y(${MIN_Y} ~ ${MAX_Y})`);
+    // 擴展邊界（包含卡牌完整大小）
+    MIN_X = BASE_MIN_X - CARD_SIZE / 2;
+    MAX_X = BASE_MAX_X + CARD_SIZE / 2;
+    MIN_Y = PAD_TOP;  // 從 PAD_TOP 開始
+    MAX_Y = PAD_TOP + (ROWS * GRID_STEP) + (CARD_SIZE * 2) + 40;  // 包含網格 + 卡槽空間
+
+    console.log(`========== 遊戲坐標系統 ==========`);
+    console.log(`BASE_MIN: (${BASE_MIN_X}, ${BASE_MIN_Y})`);
+    console.log(`BASE_MAX: (${BASE_MAX_X}, ${BASE_MAX_Y})`);
+    console.log(`MIN/MAX: X(${MIN_X}~${MAX_X}), Y(${MIN_Y}~${MAX_Y})`);
+    console.log(`CARD_SIZE: ${CARD_SIZE}, GRID_STEP: ${GRID_STEP}`);
+    console.log(`=================================`);
+
     BASE_POSITIONS = generateBaseGrid();
 
-    // 自動計算縮放比例以適應螢幕
-    let logicWidth = MAX_X - MIN_X;
-    let logicHeight = MAX_Y - MIN_Y;
-    let scaleX = screenWidth / logicWidth;
-    let scaleY = screenHeight / logicHeight;
-    cardScale = Math.min(scaleX, scaleY) * 0.95; // 稍微增加縮放比例
-    
-    // 水平居中
-    offsetX = (screenWidth - logicWidth * cardScale) / 2;
-    
-    // 垂直居中在中間區域
-    const scaledContentHeight = logicHeight * cardScale;
-    offsetY = MIDDLE_AREA_START + (MIDDLE_AREA_HEIGHT - scaledContentHeight) / 2;
-
-    // 詳細輸出系統資訊
-    console.log("========== 系統詳細資訊 ==========");
-    console.log(`screenWidth: ${sys.screenWidth}px`);
-    console.log(`screenHeight: ${sys.screenHeight}px`);
-    console.log(`佈局百分比 - 上:20%(${TOP_AREA_HEIGHT}px) 中:60%(${MIDDLE_AREA_HEIGHT}px) 下:20%(${screenHeight * 0.20}px)`);
-    console.log(`縮放比例: ${cardScale}, 偏移: (${offsetX}, ${offsetY})`);
-    console.log(`內容邏輯大小: ${logicWidth}x${logicHeight}, 縮放後: ${logicWidth * cardScale}x${logicHeight * cardScale}`);
-    console.log("==================================");
+    // 不需要額外的縮放和偏移，因為坐標已經是世界坐標
+    cardScale = 1;
+    offsetX = 0;
+    offsetY = 0;
 
     initAudio();
 
