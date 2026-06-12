@@ -1,6 +1,12 @@
 {
   "deviceOrientation": "portrait",
   "showStatusBar": false,
+  "subpackages": [
+    {
+      "name": "res",
+      "root": "res/"
+    }
+  ],
   "networkTimeout": {
     "request": 5000,
     "connectSocket": 5000,
