@@ -1,10 +1,10 @@
-// ==================== 可調整參數（基礎值，會根據螢幕大小自動調整） ====================
+// 可調整參數（基礎值，會根據螢幕大小自動調整）
 const BASE_CARD_SIZE = 60;
 const COLS = 6;
 const ROWS = 7;
 const TOP_AREA_RATIO = 0.20;
 const BOTTOM_AREA_RATIO = 0.15;
-const MIDDLE_AREA_RATIO = 1 - TOP_AREA_RATIO - BOTTOM_AREA_RATIO;
+const MIDDLE_AREA_RATIO = 1 - TOP_AREA_RATIO - BOTTOM_AREA_RATIO; 
 
 // ==================== 音效配置 ====================
 const CLICK_SOUND_URL = 'res/click.mp3';
@@ -12,22 +12,30 @@ const BGM1_URL = 'res/bgm1.mp3';
 const BGM2_URL = 'res/bgm2.mp3';
 const WASH_SOUND_URL = 'res/wash.mp3';
 const THROW_SOUND_URL = 'res/throw.mp3';
+const THROWBOMB_SOUND_URL = 'res/throwbomb.mp3';
+const EXPLOSION_SOUND_URL = 'res/explosion.mp3';
+const COINS_SOUND_URL = 'res/coins.mp3';
 const DROP_SOUND_URL = 'res/drop.mp3';
+const DROPS_SOUND_URL = 'res/drops.mp3';
 const CLEAR_SOUND_URL = 'res/clear.mp3';
 
 let clickAudio = null;
 let bgmAudio = null;
 let washAudio = null;
 let throwAudio = null;
+let throwBombAudio = null;
+let explosionAudio = null;
+let coinsAudio = null;
 let dropAudio = null;
+let dropsAudio = null;
 let clearAudio = null;
 let currentBgmIndex = 1;
 let bgmEnabled = true;
 let sfxEnabled = true;
 
-// ==================== 洗牌次數限制 ====================
-let shuffleRemainingCount = 3;
-let throwBackRemainingCount = 3;
+// ==================== 道具系統（商店購買 + 道具櫃） ====================
+let ownedItems = [];  // ['wash' | 'throw' | 'switch']，最多 5 個
+let baseVariant = 0;  // 0 = slot.png, 1 = slot1.png
 
 // ==================== 關卡選擇器 ====================
 let settingsVisible = false;
@@ -153,7 +161,7 @@ function calculateDynamicSizes() {
     // === 各元件尺寸 ===
     SETTINGS_BTN_SIZE = Math.max(24, Math.round(28 * scaleFactor));
     SCORE_BG_HEIGHT = Math.max(26, Math.round(32 * scaleFactor));
-    SCORE_BG_WIDTH = Math.max(90, Math.round(120 * scaleFactor));
+    SCORE_BG_WIDTH = Math.max(110, Math.round(140 * scaleFactor));
     INFO_FONT_SIZE = Math.max(16, Math.round(18 * scaleFactor));
 
     // === 膠囊水平避讓，右側區塊對齊 TOP_AREA 下緣 ===
@@ -192,37 +200,49 @@ function calculateDynamicSizes() {
     // === 卡槽背景動態尺寸與位置 ===
     const SLOT_ASPECT = 900 / 230;
     
-    // 寬度以 8 張卡牌為基準，但避免四捨五入後超出螢幕邊界
-    SLOT_BG_WIDTH = Math.min(CARD_SIZE * 8, screenWidth);
+    // 盡量用滿螢幕寬度，確保不超出螢幕
+    const SLOT_MARGIN = Math.round(12 * scaleFactor);
+    SLOT_BG_WIDTH = screenWidth - SLOT_MARGIN * 2;
     // 高度等比例縮放
     SLOT_BG_HEIGHT = SLOT_BG_WIDTH / SLOT_ASPECT;
     const oldSlotY = PAD_TOP + SLOT_Y_OFFSET;
     const oldSlotHeight = CARD_SIZE * 2;
     SLOT_BG_X = (screenWidth - SLOT_BG_WIDTH) / 2;
     SLOT_BG_Y = oldSlotY - (SLOT_BG_HEIGHT - oldSlotHeight) / 2;
-    // === 底部按鈕位置 ===
-    const BTN_WIDTH = Math.round(95 * scaleFactor);
-    const BTN_HEIGHT = Math.round(42 * scaleFactor);
+    // === 底部道具商店區域 ===
+    const bottomCenterY = BOTTOM_AREA_START + BOTTOM_AREA_HEIGHT / 2;
+    const shopSize = Math.round(Math.min(BOTTOM_AREA_HEIGHT * 0.7, 60));
 
+    // 商店圖（最左側）
+    const shopX = Math.round(screenWidth * 0.02 + 8);
+    const shopY = Math.round(bottomCenterY - shopSize / 2);
 
-    const BTN_CENTER_Y = BOTTOM_AREA_START + (BOTTOM_AREA_HEIGHT / 2) - (BTN_HEIGHT / 2);
+    // Shelf 道具櫃（商店右側剩餘空間）
+    const shelfH = Math.round(shopSize * 1.2);
+    const shelfX = shopX + shopSize + 8;
+    const shelfW = Math.max(60, screenWidth - shelfX - 8);
+    const shelfAspect = 1100 / 228;
+    const shelfDrawH = Math.min(shelfH, shelfW / shelfAspect);
+    const shelfDrawW = shelfDrawH * shelfAspect;
+    const shelfY = Math.round(bottomCenterY - shelfDrawH / 2);
 
-    const totalButtonsWidth = BTN_WIDTH * 2 + BTN_GAP;
-    const startX = (screenWidth - totalButtonsWidth) / 2;
+    // 計算 shelf 內每個格子的位置（中間寬、兩側向內收）
+    const slotW = Math.round(shelfDrawW * 0.175);
+    const slotGapX = Math.round((shelfDrawW - slotW * 5) / 6);
+    const slotShift = [slotGapX * 1.5, slotGapX * 0.5, 0, -slotGapX * 0.5, -slotGapX * 1.5];
+    shelfSlots = [];
+    for (let i = 0; i < 5; i++) {
+        shelfSlots.push({
+            x: shelfX + slotGapX + (slotW + slotGapX) * i + slotShift[i],
+            y: shelfY + Math.round(shelfDrawH * 0.15),
+            w: slotW,
+            h: Math.round(shelfDrawH * 0.7),
+            item: null
+        });
+    }
 
-    shuffleBtnRect = {
-        x: startX,
-        y: BTN_CENTER_Y,
-        w: BTN_WIDTH,
-        h: BTN_HEIGHT
-    };
-
-    throwBackBtnRect = {
-        x: startX + BTN_WIDTH + BTN_GAP,
-        y: BTN_CENTER_Y,
-        w: BTN_WIDTH,
-        h: BTN_HEIGHT
-    };
+    // 商店圖點擊區域
+    shopWashRect = { x: shopX - 4, y: shopY - 4, w: shopSize + 8, h: shopSize + 8 };
 
     console.log(`========== 動態尺寸計算 ==========`);
     console.log(`螢幕尺寸: ${screenWidth}x${screenHeight}`);
@@ -313,7 +333,10 @@ let throwBackAnimations = [];
 let shuffleAnimations = [];
 let actionAnimations = [];
 let throwActionAnimations = [];
+let danceAnimations = [];
+let bombAnimations = [];
 let landingEffects = [];
+let gameOverState = null;  // null | 'win' | 'fail'
 
 // ==================== 全域變數 ====================
 let canvas, ctx;
@@ -330,12 +353,15 @@ let screenWidth, screenHeight;
 let offsetX = 0, offsetY = 0;
 let cardScale = 1;
 
-// 在全局变量区域添加新的按钮矩形变量（替换原来的）
-let shuffleBtnRect = { x: 0, y: 0, w: 95, h: 42 };
-let throwBackBtnRect = { x: 0, y: 0, w: 95, h: 42 };
 let settingsResetBtnRect = { x: 0, y: 0, w: 0, h: 0 };
 let settingsBtnRect = { x: 0, y: 0, w: 80, h: 35 };
 let gameOverBtnRect = { x: 0, y: 0, w: 0, h: 0 };
+let shopWashRect = { x: 0, y: 0, w: 0, h: 0 };
+let shopThrowRect = { x: 0, y: 0, w: 0, h: 0 };
+let shelfSlots = [];  // [{ x, y, w, h, item: 'wash'|'throw'|null }]
+let shopOpen = false;
+let shopItemRects = [];  // [{ x, y, w, h, name, cost, icon }]
+let shopCloseRect = { x: 0, y: 0, w: 0, h: 0 };
 
 // 顏色主題
 const colors = {
@@ -396,11 +422,39 @@ function initAudio() {
         console.error("丟回音效載入失敗:", err);
     });
 
+    throwBombAudio = wx.createInnerAudioContext();
+    throwBombAudio.src = THROWBOMB_SOUND_URL;
+    throwBombAudio.volume = 0.5;
+    throwBombAudio.onError((err) => {
+        console.error("丟炸彈音效載入失敗:", err);
+    });
+
+    explosionAudio = wx.createInnerAudioContext();
+    explosionAudio.src = EXPLOSION_SOUND_URL;
+    explosionAudio.volume = 0.6;
+    explosionAudio.onError((err) => {
+        console.error("爆炸音效載入失敗:", err);
+    });
+
+    coinsAudio = wx.createInnerAudioContext();
+    coinsAudio.src = COINS_SOUND_URL;
+    coinsAudio.volume = 0.5;
+    coinsAudio.onError((err) => {
+        console.error("金幣音效載入失敗:", err);
+    });
+
     dropAudio = wx.createInnerAudioContext();
     dropAudio.src = DROP_SOUND_URL;
     dropAudio.volume = 0.5;
     dropAudio.onError((err) => {
         console.error("掉落音效載入失敗:", err);
+    });
+
+    dropsAudio = wx.createInnerAudioContext();
+    dropsAudio.src = DROPS_SOUND_URL;
+    dropsAudio.volume = 0.6;
+    dropsAudio.onError((err) => {
+        console.error("山崩音效載入失敗:", err);
     });
 
     clearAudio = wx.createInnerAudioContext();
@@ -452,7 +506,7 @@ function switchBgm() {
 function loadCardImages() {
     return new Promise((resolve) => {
         let loadedCount = 0;
-        const totalImages = CARD_KEYS.length + 6 + 6 + 3; // +6 動畫圖 + 3 丟回動作圖
+        const totalImages = CARD_KEYS.length + 6 + 6 + 3 + 1 + 1 + 4 + 2 + 1 + 1 + 1 + 5 + 1; // +5 dance frames +1 dance icon
 
         // 載入標題圖片
         const titleImg = wx.createImage();
@@ -587,22 +641,86 @@ function loadCardImages() {
                 if (loadedCount === totalImages) resolve();
             };
         }
-        // 載入卡槽背景
-        const slotsImg = wx.createImage();
-        slotsImg.src = 'images/slots.png';
+        // 載入跳舞動畫圖片
+        for (let f = 1; f <= 5; f++) {
+            const danceImg = wx.createImage();
+            danceImg.src = `res/action/dance${f}.png`;
+            danceImg.onload = () => {
+                loadedCount++;
+                loadedImages[`dance${f}`] = danceImg;
+                if (loadedCount === totalImages) resolve();
+            };
+            danceImg.onerror = (err) => {
+                console.error(`載入跳舞動畫圖片 dance${f} 失敗:`, err);
+                loadedCount++;
+                loadedImages[`dance${f}`] = null;
+                if (loadedCount === totalImages) resolve();
+            };
+        }
+        // 載入卡槽棧板圖片
+        const palletImg = wx.createImage();
+        palletImg.src = 'images/pallet.png';
 
-        slotsImg.onload = () => {
+        palletImg.onload = () => {
             loadedCount++;
-            loadedImages['slots'] = slotsImg;
+            loadedImages['pallet'] = palletImg;
             if (loadedCount === totalImages) resolve();
         };
 
-        slotsImg.onerror = (err) => {
-            console.error('載入卡槽圖片失敗:', err);
+        palletImg.onerror = (err) => {
+            console.error('載入棧板圖片失敗:', err);
             loadedCount++;
-            loadedImages['slots'] = null;
+            loadedImages['pallet'] = null;
             if (loadedCount === totalImages) resolve();
         };
+
+        // 載入失敗畫面圖片
+        const failImg = wx.createImage();
+        failImg.src = 'images/fail.png';
+        failImg.onload = () => {
+            loadedCount++;
+            loadedImages['fail'] = failImg;
+            if (loadedCount === totalImages) resolve();
+        };
+        failImg.onerror = (err) => {
+            console.error('載入失敗圖片失敗:', err);
+            loadedCount++;
+            loadedImages['fail'] = null;
+            if (loadedCount === totalImages) resolve();
+        };
+
+        // 載入通關圖片
+        const winImg = wx.createImage();
+        winImg.src = 'images/win.png';
+        winImg.onload = () => {
+            loadedCount++;
+            loadedImages['win'] = winImg;
+            if (loadedCount === totalImages) resolve();
+        };
+        winImg.onerror = (err) => {
+            console.error('載入通關圖片失敗:', err);
+            loadedCount++;
+            loadedImages['win'] = null;
+            if (loadedCount === totalImages) resolve();
+        };
+
+        // 載入商店相關圖片
+        const loadSimpleImg = (key, path) => {
+            const img = wx.createImage();
+            img.src = path;
+            img.onload = () => { loadedCount++; loadedImages[key] = img; if (loadedCount === totalImages) resolve(); };
+            img.onerror = (err) => { console.error(`載入 ${key} 失敗:`, err); loadedCount++; loadedImages[key] = null; if (loadedCount === totalImages) resolve(); };
+        };
+        loadSimpleImg('shop', 'images/shop.png');
+        loadSimpleImg('shelf', 'images/shelf.png');
+        loadSimpleImg('washIcon', 'images/wash.png');
+        loadSimpleImg('throwIcon', 'images/throw.png');
+        loadSimpleImg('switchIcon', 'images/switch.png');
+        loadSimpleImg('slotBase1', 'images/slot1.png');
+        loadSimpleImg('bombIcon', 'images/bomb.png');
+        loadSimpleImg('explode', 'images/explode.png');
+        loadSimpleImg('shakeIcon', 'images/shake.png');
+        loadSimpleImg('danceIcon', 'images/dance.png');
     });
 }
 
@@ -782,6 +900,10 @@ function isCardCovered(card, allCards) {
     return false;
 }
 
+function isCardCoveredBy(upperCard, lowerCard) {
+    return upperCard.layer > lowerCard.layer && isRectOverlap(upperCard, lowerCard);
+}
+
 function updateAllCardsClickable() {
     for (let card of stackCards) {
         if (!card.removed) {
@@ -800,9 +922,413 @@ function getDisplayScore() {
     return totalScore + currentRoundScore;
 }
 
+function buyItem(type) {
+    if (!gameActive) return;
+    const costMap = { wash: 100, throw: 30, switch: 50, bomb: 200, shake: 60, dance: 70 };
+    const cost = costMap[type] || 0;
+    if (cost === 0) return;
+    const displayScore = getDisplayScore();
+    if (displayScore < cost) {
+        wx.showToast({ title: '金幣不足！', icon: 'none', duration: 1000 });
+        return;
+    }
+    if (ownedItems.length >= 5) {
+        wx.showToast({ title: '道具櫃已滿！', icon: 'none', duration: 1000 });
+        return;
+    }
+    // 扣金幣（從 currentRoundScore 先扣，不夠再扣 totalScore）
+    if (currentRoundScore >= cost) {
+        currentRoundScore -= cost;
+    } else {
+        const remaining = cost - currentRoundScore;
+        currentRoundScore = 0;
+        totalScore -= remaining;
+    }
+    ownedItems.push(type);
+    // 播放購買音效
+    if (sfxEnabled && coinsAudio) {
+        coinsAudio.stop();
+        coinsAudio.play();
+    }
+}
+
+function toggleBase() {
+    baseVariant = baseVariant === 0 ? 1 : 0;
+}
+
+function useDance() {
+    if (!gameActive) return;
+    let active = stackCards.filter(c => !c.removed && !c.isAnimating);
+    if (active.length === 0) return;
+
+    // 挑選最多 5 張：沒被蓋住 + 有蓋住別的卡牌
+    let candidates = active.filter(c => {
+        if (!c.clickable) return false;
+        // 檢查是否有蓋住其他卡牌
+        return active.some(other => other !== c && isCardCoveredBy(c, other));
+    });
+    if (candidates.length === 0) {
+        // fallback: 至少有 clickable 的牌
+        candidates = active.filter(c => c.clickable);
+    }
+    candidates = candidates.slice(0, 5);
+
+    const dirs = [[-1,0],[1,0],[0,-1],[0,1]];
+    const topLayer = stackCards.reduce((mx, c) => Math.max(mx, c.layer), 0) + 10;
+    for (let card of candidates) {
+        card.isAnimating = true;
+        // 計算卡牌當前的網格位置
+        const curCol = Math.round((card.x - BASE_MIN_X) / GRID_STEP);
+        const curRow = Math.round((card.y - BASE_MIN_Y) / GRID_STEP);
+        // 靠近邊緣則向內移動
+        const nearLeft = curCol <= 1;
+        const nearRight = curCol >= COLS - 2;
+        const nearTop = curRow <= 1;
+        const nearBottom = curRow >= ROWS - 2;
+        let dc, dr;
+        if (nearLeft && !nearRight) dc = 1;
+        else if (nearRight && !nearLeft) dc = -1;
+        else if (nearTop && !nearBottom) dr = 1;
+        else if (nearBottom && !nearTop) dr = -1;
+        if (dc === undefined && dr === undefined) {
+            const rdir = dirs[Math.floor(Math.random() * dirs.length)];
+            dc = rdir[0]; dr = rdir[1];
+        } else {
+            dc = dc || (Math.random() < 0.5 ? -1 : 1);
+            dr = dr || (Math.random() < 0.5 ? -1 : 1);
+        }
+        // 移動 1 個網格步長並限制在合法範圍
+        const newCol = Math.max(0, Math.min(COLS - 1, curCol + dc));
+        const newRow = Math.max(0, Math.min(ROWS - 1, curRow + dr));
+        const clampedX = BASE_MIN_X + newCol * GRID_STEP;
+        const clampedY = BASE_MIN_Y + newRow * GRID_STEP;
+        card._danceAnim = {
+            fromX: card.x, fromY: card.y,
+            toX: clampedX, toY: clampedY,
+            startTime: 0, duration: 2000
+        };
+        card.layer = topLayer;  // 移到最上層
+    }
+
+    danceAnimations.push({
+        startTime: Date.now(),
+        frame: 1,
+        phase: 'dance',
+        moveStartTime: 0,
+        targets: candidates  // 記錄受影響的卡牌
+    });
+}
+
+function updateDanceAnimations() {
+    if (danceAnimations.length === 0) return;
+    const now = Date.now();
+    const frameInterval = 150;
+
+    for (let i = danceAnimations.length - 1; i >= 0; i--) {
+        const a = danceAnimations[i];
+        const elapsed = now - a.startTime;
+
+        if (a.phase === 'dance') {
+            if (elapsed < 3000) {
+                const cycleTime = elapsed < 500 ? 500 : elapsed - 500;
+                const cycleFrame = Math.floor((cycleTime % (frameInterval * 4)) / frameInterval);
+                a.frame = elapsed < 500 ? 1 : 2 + cycleFrame;
+            } else {
+                // 3秒後開始移動卡牌
+                a.phase = 'move';
+                a.moveStartTime = now;
+                // 設定卡牌動畫的實際開始時間
+                for (let card of a.targets) {
+                    if (card._danceAnim) card._danceAnim.startTime = now;
+                }
+                updateAllCardsClickable();
+            }
+        }
+
+        // 卡牌移動動畫（僅在 move 階段更新）
+        if (a.phase === 'move') {
+            for (let card of a.targets) {
+                const da = card._danceAnim;
+                if (!da || !da.startTime) continue;
+                const p = Math.min((now - da.startTime) / da.duration, 1);
+                const ease = easeOutCubic(p);
+                card.x = da.fromX + (da.toX - da.fromX) * ease;
+                card.y = da.fromY + (da.toY - da.fromY) * ease;
+                const shakeAmp = (1 - p) * CARD_SIZE * 0.25;
+                card.x += Math.sin(now * 0.03 + card.y * 0.01) * shakeAmp;
+                card.y += Math.cos(now * 0.035 + card.x * 0.01) * shakeAmp;
+                if (p >= 1) {
+                    card.x = da.toX; card.y = da.toY;
+                    delete card._danceAnim;
+                    delete card.isAnimating;
+                }
+            }
+        }
+
+        if (a.phase === 'move' && now - a.moveStartTime > 2500) {
+            danceAnimations.splice(i, 1);
+            updateAllCardsClickable();
+        }
+    }
+}
+
+function useShake() {
+    if (!gameActive) return;
+    let active = stackCards.filter(c => !c.removed && (!c.isAnimating || c.willRemove));
+    if (active.length === 0) return;
+
+    // 按位置分組（對齊到 GRID_STEP 網格）
+    const gridStep = GRID_STEP;
+    const posMap = {};
+    for (let c of active) {
+        const gx = Math.round(c.x / gridStep) * gridStep;
+        const gy = Math.round(c.y / gridStep) * gridStep;
+        const key = `${gx},${gy}`;
+        if (!posMap[key]) posMap[key] = { x: gx, y: gy, cards: [] };
+        posMap[key].cards.push(c);
+    }
+
+    // 找出中心點 + 上下左右共 5 個位置合計卡牌最多的
+    const neighborOffsets = [[0,0],[0,-1],[0,1],[-1,0],[1,0]];
+    let bestCenter = null;
+    let maxTotal = 0;
+    for (let key in posMap) {
+        const [cx, cy] = key.split(',').map(Number);
+        let total = 0;
+        for (let [dx, dy] of neighborOffsets) {
+            const nk = `${cx + dx * gridStep},${cy + dy * gridStep}`;
+            if (posMap[nk]) total += posMap[nk].cards.length;
+        }
+        if (total > maxTotal) { maxTotal = total; bestCenter = { x: cx, y: cy }; }
+    }
+    if (!bestCenter) return;
+
+    // 收集中心 + 上下左右五個位置的所有卡牌
+    let affectedCards = [];
+    for (let [dx, dy] of neighborOffsets) {
+        const key = `${bestCenter.x + dx * gridStep},${bestCenter.y + dy * gridStep}`;
+        if (posMap[key]) affectedCards.push(...posMap[key].cards);
+    }
+    if (affectedCards.length === 0) return;
+
+    // 播放山崩音效
+    if (sfxEnabled && dropsAudio) {
+        dropsAudio.stop();
+        dropsAudio.play();
+    }
+
+    // 對受影響區域每張卡牌往 8 個方向隨機外移 0.5～1 個卡牌距離（動畫 3 秒）
+    const dirs = [[-1,-1],[-1,0],[-1,1],[0,-1],[0,1],[1,-1],[1,0],[1,1]];
+    const now = Date.now();
+    for (let card of affectedCards) {
+        card.isAnimating = true;
+        const dir = dirs[Math.floor(Math.random() * dirs.length)];
+        const dist = CARD_SIZE * (0.5 + Math.random() * 0.5);
+        const newX = card.x + dir[0] * dist;
+        const newY = card.y + dir[1] * dist;
+        const clampedX = Math.round(Math.max(CARD_SIZE * 0.5, Math.min(screenWidth - CARD_SIZE * 0.5, newX)) / GRID_STEP) * GRID_STEP;
+        const clampedY = Math.round(Math.max(CARD_SIZE * 0.5, Math.min(screenHeight * 0.7, newY)) / GRID_STEP) * GRID_STEP;
+        card._shakeAnim = {
+            fromX: card.x, fromY: card.y,
+            toX: clampedX, toY: clampedY,
+            startTime: now, duration: 3000
+        };
+        card.layer = (card.layer || 1) + Math.floor(Math.random() * 0.5);
+    }
+}
+
+function updateShakeAnimations() {
+    const now = Date.now();
+    for (let card of stackCards) {
+        const a = card._shakeAnim;
+        if (!a) continue;
+        const progress = Math.min((now - a.startTime) / a.duration, 1);
+        const ease = easeOutCubic(progress);
+        card.x = a.fromX + (a.toX - a.fromX) * ease;
+        card.y = a.fromY + (a.toY - a.fromY) * ease;
+        // 抖動效果：小幅正弦震動（初期強烈，逐漸衰減）
+        const shakeAmp = (1 - progress) * CARD_SIZE * 0.25;
+        card.x += Math.sin(now * 0.03 + card.y * 0.01) * shakeAmp;
+        card.y += Math.cos(now * 0.035 + card.x * 0.01) * shakeAmp;
+        if (progress >= 1) {
+            delete card._shakeAnim;
+            delete card.isAnimating;
+        }
+    }
+}
+
+function useBomb(shelfIndex) {
+    if (!gameActive) return;
+    // 從櫃中移除
+    if (shelfIndex < ownedItems.length && ownedItems[shelfIndex] === 'bomb') {
+        ownedItems.splice(shelfIndex, 1);
+    }
+    let active = stackCards.filter(c => !c.removed && !c.isAnimating);
+    if (active.length === 0) return;
+
+    // 隨機選一個位置
+    const targetCard = active[Math.floor(Math.random() * active.length)];
+    const targetX = targetCard.x;
+    const targetY = targetCard.y;
+
+    // 收集該位置附近最多 5 張牌
+    let nearby = active.filter(c => {
+        const dist = Math.hypot(c.x - targetX, c.y - targetY);
+        return dist < CARD_SIZE * 0.9;
+    });
+    nearby.sort((a, b) => b.layer - a.layer);
+    nearby = nearby.slice(0, 5);
+
+    // 確保每種類型都是 3 的倍數：從其他位置移除多餘的牌
+    let removedIcons = nearby.map(c => c.icon);
+    let allIcons = active.map(c => c.icon);
+
+    // 檢查 removed 後的剩餘是否都是 3 的倍數
+    let remainingIcons = [...allIcons];
+    for (let ic of removedIcons) {
+        const idx = remainingIcons.indexOf(ic);
+        if (idx !== -1) remainingIcons.splice(idx, 1);
+    }
+
+    // 找出需要額外移除的牌
+    let count = new Map();
+    for (let ic of remainingIcons) count.set(ic, (count.get(ic) || 0) + 1);
+    let extraToRemove = [];
+    for (let [ic, cnt] of count) {
+        while (cnt % 3 !== 0 && cnt > 0) {
+            cnt--;
+            extraToRemove.push(ic);
+        }
+    }
+
+    let extraCards = active.filter(c => !nearby.includes(c));
+    let finalRemove = [...nearby];
+    for (let ic of extraToRemove) {
+        let found = extraCards.find(c => c.icon === ic && !finalRemove.includes(c));
+        if (found) finalRemove.push(found);
+    }
+
+    // 標記為等待爆炸後飛走（不設 isAnimating，卡牌仍正常顯示）
+    for (let c of finalRemove) {
+        c.willRemove = true;
+    }
+
+    // 炸彈從 shelf 位置飛到螢幕中央（變大），再落到目標位置
+    const shelfSlot = shelfSlots[shelfIndex] || { x: screenWidth * 0.5, y: screenHeight * 0.9, w: 30, h: 30 };
+    const startX = shelfSlot.x + shelfSlot.w / 2 - CARD_SIZE * 0.35;
+    const startY = shelfSlot.y - CARD_SIZE * 0.3;
+    const centerX = screenWidth / 2 - screenHeight * 0.25;
+    const centerY = screenHeight * 0.15;
+    bombAnimations.push({
+        x: startX, y: startY,
+        startX, startY,
+        centerX, centerY,
+        targetX: targetX - CARD_SIZE / 2,
+        targetY: targetY - CARD_SIZE / 2,
+        startTime: Date.now(),
+        size: CARD_SIZE * 0.7,
+        bigSize: screenHeight * 0.5,
+        phase: 'flyUp',
+        cards: finalRemove,
+        cardStartTime: 0  // 卡牌飛走開始時間（爆炸後）
+    });
+    // 播放丟炸彈音效
+    if (sfxEnabled && throwBombAudio) {
+        throwBombAudio.seek(0);
+        throwBombAudio.play();
+    }
+
+    updateAllCardsClickable();
+    checkGameEnd();
+}
+
+function updateBombAnimations() {
+    if (bombAnimations.length === 0) return;
+    const now = Date.now();
+    const completed = [];
+
+    for (let i = 0; i < bombAnimations.length; i++) {
+        const a = bombAnimations[i];
+
+        if (a.phase === 'flyUp') {
+            // 飛到螢幕中央並變大（逐漸變慢，模擬向上飛失去動量）
+            const elapsed = now - a.startTime;
+            const progress = Math.min(elapsed / 500, 1);
+            const ease = easeOutQuint(progress);
+            a.x = a.startX + (a.centerX - a.startX) * ease;
+            a.y = a.startY + (a.centerY - a.startY) * ease;
+            a.size = CARD_SIZE * 0.7 + (a.bigSize - CARD_SIZE * 0.7) * ease;
+            if (progress >= 1) {
+                a.phase = 'flyDown';
+                a.flyDownStart = now;
+            }
+        } else if (a.phase === 'flyDown') {
+            // 從中央落到目標位置（逐漸變快，模擬向下掉落加速）
+            const elapsed = now - a.flyDownStart;
+            const progress = Math.min(elapsed / 400, 1);
+            const ease = easeInQuint(progress);
+            a.x = a.centerX + (a.targetX - a.centerX) * ease;
+            a.y = a.centerY + (a.targetY - a.centerY) * ease;
+            a.size = a.bigSize + (CARD_SIZE * 0.7 - a.bigSize) * ease;
+            if (progress >= 1) {
+                a.phase = 'explode';
+                a.explodeTime = now;
+                a.cardStartTime = now;
+                // 爆炸開始時標記卡牌為動畫中，更新可點擊狀態
+                for (let c of a.cards) {
+                    c.isAnimating = true;
+                }
+                updateAllCardsClickable();
+                // 停止丟炸彈音效，播放爆炸音效
+                if (sfxEnabled && throwBombAudio) throwBombAudio.stop();
+                if (sfxEnabled && explosionAudio) {
+                    explosionAudio.seek(0);
+                    explosionAudio.play();
+                }
+            }
+        } else {
+            // 爆炸效果 + 卡牌飛走
+            const expElapsed = now - a.explodeTime;
+            const expProgress = Math.min(expElapsed / 800, 1);
+            const scale = expProgress < 0.3
+                ? 0.5 + expProgress * 5
+                : 2.0 - (expProgress - 0.3) * 1.5;
+            a.explodeSize = CARD_SIZE * Math.max(scale, 0.3);
+            a.explodeAlpha = expProgress < 0.6 ? 1 : 1 - (expProgress - 0.6) / 0.4;
+
+            // 卡牌飛出：爆炸開始後卡牌從原位飛向屏幕外
+            const cardElapsed = now - a.cardStartTime;
+            const cardProgress = Math.min(cardElapsed / 600, 1);
+            for (let c of a.cards) {
+                if (!c._flyDir) {
+                    c._flyDir = { dx: (Math.random() - 0.5) * 2, dy: -(0.5 + Math.random()) };
+                }
+                c._flyX = c.x + c._flyDir.dx * screenWidth * cardProgress;
+                c._flyY = c.y + c._flyDir.dy * screenHeight * cardProgress;
+                c._flyAlpha = 1 - cardProgress;
+            }
+
+            if (expProgress >= 1) completed.push(i);
+        }
+    }
+
+    for (let idx of completed.reverse()) {
+        const anim = bombAnimations[idx];
+        for (let c of anim.cards) {
+            c.removed = true;
+            delete c.willRemove;
+            delete c.isAnimating;
+            delete c._flyDir;
+        }
+        bombAnimations.splice(idx, 1);
+        updateAllCardsClickable();
+        checkGameEnd();
+    }
+}
+
 function resetToolCounts() {
-    shuffleRemainingCount = 3;
-    throwBackRemainingCount = 3;
+    ownedItems = [];
+    baseVariant = 0;
 }
 
 function eliminateFromSlot() {
@@ -864,73 +1390,19 @@ function checkGameEnd() {
     let remaining = stackCards.filter(c => !c.removed).length;
     if (remaining === 0 && slotCards.length === 0 && gameActive) {
         gameActive = false;
-
-        // ★ 將當前關卡分數累加到總分
+        gameOverState = 'win';
         totalScore += currentRoundScore;
-        currentRoundScore = 0;  // 重置當前關卡分數
-
-        if (currentLevel < TOTAL_LEVELS) {
-            wx.showModal({
-                title: `🎉 第${currentLevel}關通關！`,
-                content: `累積總分：${totalScore}\n下一關即將開始！`,
-                confirmText: '下一關',
-                cancelText: '重玩此關',
-                success: (res) => {
-                    if (res.confirm) {
-                        currentLevel++;
-                        resetToolCounts();
-                        loadLevel(currentLevel, true);  // true 表示保留總分
-                    } else {
-                        resetToolCounts();
-                        loadLevel(currentLevel, false); // false 表示重玩此關不保留本次分數
-                        // 注意：重玩此關時，之前累積的 totalScore 不變，但 currentRoundScore 已歸零
-                    }
-                }
-            });
-        } else {
-            // 最終通關，顯示累積總分
-            wx.showModal({
-                title: '🏆 恭喜通關全部關卡！',
-                content: `累積總得分：${totalScore}`,
-                showCancel: false,
-                success: () => {
-                    // 遊戲完成後可以選擇重置或回到第一關
-                    totalScore = 0;
-                    currentLevel = 1;
-                    resetToolCounts();
-                    loadLevel(1, false);
-                }
-            });
-        }
+        currentRoundScore = 0;
         return true;
     }
-    if (slotCards.length >= 7 && gameActive) {
+    if (slotCards.length >= 6 && gameActive) {
         let can = false;
         let cnt = new Map();
         for (let icon of slotCards) cnt.set(icon, (cnt.get(icon) || 0) + 1);
         for (let v of cnt.values()) if (v >= 3) can = true;
         if (!can) {
             gameActive = false;
-
-            // 失敗時，不保留當前關卡分數（總分不變）
-            // 可選：顯示失敗提示
-            wx.showModal({
-                title: '😭 遊戲失敗',
-                content: `累積總分：${totalScore}`,
-                confirmText: '重玩此關',
-                cancelText: '回到第一關',
-                success: (res) => {
-                    if (res.confirm) {
-                        resetToolCounts();
-                        loadLevel(currentLevel, false); // 重玩此關，不保留本次失敗的分數
-                    } else {
-                        totalScore = 0;  // 重置總分
-                        currentLevel = 1;
-                        resetToolCounts();
-                        loadLevel(1, false);
-                    }
-                }
-            });
+            gameOverState = 'fail';
             return true;
         }
     }
@@ -946,6 +1418,18 @@ function easeOutBack(t) {
     const c1 = 1.70158;
     const c3 = c1 + 1;
     return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2);
+}
+
+function easeInCubic(t) {
+    return t * t * t;
+}
+
+function easeOutQuint(t) {
+    return 1 - Math.pow(1 - t, 5);
+}
+
+function easeInQuint(t) {
+    return t * t * t * t * t;
 }
 
 function startCardAnimation(card, fromX, fromY, toX, toY) {
@@ -1292,7 +1776,7 @@ function updateThrowActionAnimations() {
 }
 
 function getSlotCardPosition(index) {
-    const slotGap = Math.max(0, (SLOT_BG_WIDTH - CARD_SIZE * 7) / 8);
+    const slotGap = Math.max(0, (SLOT_BG_WIDTH - CARD_SIZE * 6) / 7);
 
     return {
         x: SLOT_BG_X + slotGap * (index + 1) + CARD_SIZE * index,
@@ -1306,7 +1790,7 @@ function onCardClick(card) {
 
     // 計算卡槽中目標卡牌的位置
     const projectedSlotCards = getProjectedSlotCards();
-    if (projectedSlotCards.length >= 7) return;
+    if (projectedSlotCards.length >= 6) return;
 
     const targetSlotIndex = getSlotInsertIndex(card.icon, projectedSlotCards);
     const targetSlotPosition = getSlotCardPosition(targetSlotIndex);
@@ -1356,11 +1840,14 @@ function loadLevel(level, keepTotalScore = false) {
     updateAllCardsClickable();
     slotCards = [];
     gameActive = true;
+    gameOverState = null;
     activeAnimations = [];
     throwBackAnimations = [];
     shuffleAnimations = [];
     actionAnimations = [];
     throwActionAnimations = [];
+    danceAnimations = [];
+    bombAnimations = [];
     landingEffects = [];
     resetToolCounts();
 
@@ -1378,17 +1865,17 @@ function resetGame() {
 
 function shuffleRemaining() {
     if (!gameActive) return;
-    if (shuffleRemainingCount <= 0) {
-        wx.showToast({
-            title: '洗牌次數已用完',
-            icon: 'none',
-            duration: 1000
-        });
+    const washIdx = ownedItems.indexOf('wash');
+    if (washIdx === -1) {
+        wx.showToast({ title: '沒有洗牌道具', icon: 'none', duration: 1000 });
         return;
     }
 
     let active = stackCards.filter(c => !c.removed && !c.isAnimating);
     if (active.length === 0) return;
+
+    // 消耗一個洗牌道具
+    ownedItems.splice(washIdx, 1);
 
     // 洗牌 icon 列表
     let icons = active.map(c => c.icon);
@@ -1422,43 +1909,33 @@ function shuffleRemaining() {
         });
     }
 
-    shuffleRemainingCount--;
     // 播放洗牌音效（循環）
     if (sfxEnabled && washAudio) {
         washAudio.volume = 0.5;
         washAudio.seek(0);
         washAudio.play();
     }
-    wx.showToast({
-        title: `洗牌剩餘 ${shuffleRemainingCount} 次`,
-        icon: 'none',
-        duration: 1000
-    });
 }
 
 function throwBackLastSlotCard() {
     if (!gameActive) return;
-    if (throwBackRemainingCount <= 0) {
-        wx.showToast({
-            title: '丟回次數已用完',
-            icon: 'none',
-            duration: 1000
-        });
+    const throwIdx = ownedItems.indexOf('throw');
+    if (throwIdx === -1) {
+        wx.showToast({ title: '沒有丟回道具', icon: 'none', duration: 1000 });
         return;
     }
 
     if (slotCards.length === 0) {
-        wx.showToast({
-            title: '卡槽沒有卡片',
-            icon: 'none',
-            duration: 1000
-        });
+        wx.showToast({ title: '卡槽沒有卡片', icon: 'none', duration: 1000 });
         return;
     }
 
-    const slotIndex = slotCards.length - 1;
+    // 消耗一個丟回道具
+    ownedItems.splice(throwIdx, 1);
+
+    const slotIndex = 0;  // 丟回第一個位置的卡牌
     const fromPosition = getSlotCardPosition(slotIndex);
-    const icon = slotCards.pop();
+    const icon = slotCards.shift();
     const activeCards = stackCards.filter(c => !c.removed && !c.isAnimating);
     const positionPool = activeCards.length > 0 ? activeCards : BASE_POSITIONS;
     const target = positionPool[Math.floor(Math.random() * positionPool.length)];
@@ -1480,13 +1957,6 @@ function throwBackLastSlotCard() {
         targetLayer: topLayer
     });
 
-    throwBackRemainingCount--;
-
-    wx.showToast({
-        title: `丟回剩餘 ${throwBackRemainingCount} 次`,
-        icon: 'none',
-        duration: 1000
-    });
 }
 
 function toggleSettings() {
@@ -1520,7 +1990,7 @@ function roundRect(ctx, x, y, w, h, r) {
 }
 function drawCard(ctx, card, x, y, scale = 1, alpha = 1, isAnimating = false, rotation = 0) {
     const img = loadedImages[card.icon];
-    const slotBase = loadedImages['slotBase'];
+    const slotBase = loadedImages[baseVariant === 0 ? 'slotBase' : 'slotBase1'];
     const size = CARD_SIZE * scale;
     const offset = (size - CARD_SIZE) / 2;
 
@@ -1615,7 +2085,11 @@ function renderUI() {
     const MIDDLE_AREA_START = TOP_AREA_HEIGHT;
     const BOTTOM_AREA_START = TOP_AREA_HEIGHT + MIDDLE_AREA_HEIGHT;
 
-    // === 繪製上方區域背景圖片（cover 模式，半透明） ===
+    // === 上方區域背景（與中間區域同色） ===
+    ctx.fillStyle = 'rgba(220, 250, 230, 0.6)';
+    ctx.fillRect(0, 0, screenWidth, TOP_AREA_HEIGHT);
+
+    // === 繪製上方區域背景圖片（底部 30% 漸層透明） ===
     const bgTopImg = loadedImages['bgTop'];
     if (bgTopImg && bgTopImg.complete) {
         const imgW = bgTopImg.width;
@@ -1635,10 +2109,19 @@ function renderUI() {
         ctx.clip();
         ctx.globalAlpha = 0.45;
         ctx.drawImage(bgTopImg, drawX, drawY, drawW, drawH);
+
+        // 底部 30% 漸層遮罩：從透明漸變到背景色
+        const grad = ctx.createLinearGradient(0, areaH * 0.7, 0, areaH);
+        grad.addColorStop(0, 'rgba(220, 250, 230, 0)');
+        grad.addColorStop(0.5, 'rgba(220, 250, 230, 0.5)');
+        grad.addColorStop(1, 'rgba(220, 250, 230, 0.95)');
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, areaW, areaH);
         ctx.restore();
     }
 
-    // === 中間區域背景（很淺的藍色） ===
+    // === 中間區域背景（淺綠色，與上方一致） ===
     ctx.fillStyle = 'rgba(220, 250, 230, 0.6)';
     ctx.fillRect(0, MIDDLE_AREA_START, screenWidth, MIDDLE_AREA_HEIGHT);
 
@@ -1652,26 +2135,49 @@ function renderUI() {
         drawCard(ctx, c, x, y, 1, 1, false, 0);
     }
 
+    // 繪製山崩/跳舞抖動中的卡牌（有 _shakeAnim 或 _danceAnim 的卡牌在動畫中）
+    for (let c of stackCards) {
+        if (c.removed || (!c._shakeAnim && !c._danceAnim)) continue;
+        let x = c.x - CARD_SIZE / 2;
+        let y = c.y - CARD_SIZE / 2;
+        drawCard(ctx, c, x, y, 1, 1, false, 0);
+    }
+
+    // 繪製炸彈飛走的卡牌
+    for (let c of stackCards) {
+        if (c.removed || !c.willRemove || !c._flyX) continue;
+        const tempCard = { icon: c.icon, clickable: false };
+        drawCard(ctx, tempCard, c._flyX, c._flyY, 1, c._flyAlpha || 1, true, (Math.random() - 0.5) * 0.3);
+    }
+
     drawLandingEffects(ctx);
 
-    // === 繪製卡槽（固定在中间区域底部）===
-    const slotsImg = loadedImages['slots'];
+    // === 繪製卡槽棧板（每個槽位一個 pallet） ===
+    const palletImg = loadedImages['pallet'];
+    const palletW = CARD_SIZE + 16;
+    const palletH = palletW * 185 / 300;
+    const SLOT_COUNT = 6;
 
-    if (slotsImg && slotsImg.complete) {
-        ctx.drawImage(
-            slotsImg,
-            SLOT_BG_X,
-            SLOT_BG_Y,
-            SLOT_BG_WIDTH,
-            SLOT_BG_HEIGHT
-        );
+    for (let i = 0; i < SLOT_COUNT; i++) {
+        const slotPos = getSlotCardPosition(i);
+        const px = slotPos.x + (CARD_SIZE - palletW) / 2;
+        // 卡片高出棧板約一半高度
+        const py = slotPos.y + CARD_SIZE * 1.5 - palletH;
+
+        if (palletImg && palletImg.complete) {
+            ctx.drawImage(palletImg, px, py, palletW, palletH);
+        } else {
+            ctx.fillStyle = '#eeddbb';
+            roundRect(ctx, px, py, palletW, palletH, 6);
+            ctx.fill();
+        }
     }
 
     const cardSlotWidth = CARD_SIZE;  // 保持原始卡牌大小
     const cardSlotHeight = CARD_SIZE;  // 保持原始卡牌大小
 
-    // 繪製7個槽位卡片
-    for (let i = 0; i < 7; i++) {
+    // 繪製6個槽位卡片
+    for (let i = 0; i < 6; i++) {
         const cardSlotPosition = getSlotCardPosition(i);
         const cardSlotX = cardSlotPosition.x;
         const cardSlotY = cardSlotPosition.y;
@@ -1679,7 +2185,7 @@ function renderUI() {
         if (i < slotCards.length) {
             const iconKey = slotCards[i];
             const img = loadedImages[iconKey];
-            const slotBase = loadedImages['slotBase'];
+            const slotBase = loadedImages[baseVariant === 0 ? 'slotBase' : 'slotBase1'];
 
             // 繪製底座
             if (slotBase && slotBase.complete) {
@@ -1762,6 +2268,41 @@ function renderUI() {
         }
     }
 
+    // === 繪製炸彈動畫 ===
+    for (let a of bombAnimations) {
+        if (a.phase === 'flyUp' || a.phase === 'flyDown') {
+            const bombImg = loadedImages['bombIcon'];
+            if (bombImg && bombImg.complete) {
+                ctx.drawImage(bombImg, a.x, a.y, a.size, a.size);
+            }
+        } else {
+            const expImg = loadedImages['explode'];
+            if (expImg && expImg.complete) {
+                ctx.save();
+                if (a.explodeAlpha !== undefined) ctx.globalAlpha = a.explodeAlpha;
+                const es = a.explodeSize || a.size * 2;
+                const ex = a.targetX - es / 2;
+                const ey = a.targetY - es / 2;
+                ctx.drawImage(expImg, ex, ey, es, es);
+                ctx.restore();
+            }
+        }
+    }
+
+    // === 繪製跳舞動畫（全螢幕半透明） ===
+    for (let a of danceAnimations) {
+        if (a.phase === 'dance') {
+            const danceImg = loadedImages[`dance${a.frame}`];
+            if (danceImg && danceImg.complete) {
+                const imgW = 784, imgH = 1000;
+                const dw = screenWidth;
+                const dh = Math.round(screenWidth * (imgH / imgW));
+                const dy = Math.round((screenHeight - dh) / 2);
+            ctx.drawImage(danceImg, 0, dy, dw, dh);
+            }
+        }
+    }
+
     // 繪製洗牌動畫中的卡片
     for (let anim of shuffleAnimations) {
         const card = anim.card;
@@ -1770,30 +2311,153 @@ function renderUI() {
         drawCard(ctx, tempCard, anim.currentX, anim.currentY, 1, 1, true, anim.rotation || 0);
     }
 
-    // === 繪製底部按鈕（屏幕坐標系）===
-    const buttonFontSize = Math.max(14, Math.round(18 * (CARD_SIZE / BASE_CARD_SIZE)));
+    // === 繪製底部道具商店 ===
+    const shopImg = loadedImages['shop'];
+    const shelfImg = loadedImages['shelf'];
+    const washIconImg = loadedImages['washIcon'];
+    const throwIconImg = loadedImages['throwIcon'];
+    const shopSize = Math.round(Math.min(BOTTOM_AREA_HEIGHT * 0.7, 60));
+    const bottomCenterY = BOTTOM_AREA_START + BOTTOM_AREA_HEIGHT / 2;
+    const shopX = Math.round(screenWidth * 0.02 + 8);
+    const shopY = Math.round(bottomCenterY - shopSize / 2);
 
-    // 洗牌按鈕
-    ctx.fillStyle = '#ffdd99';
-    roundRect(ctx, shuffleBtnRect.x, shuffleBtnRect.y, shuffleBtnRect.w, shuffleBtnRect.h, 35);
-    ctx.fill();
-    ctx.fillStyle = '#4f2d0a';
-    ctx.font = `bold ${buttonFontSize}px "Segoe UI"`;
-    ctx.fillText('♻️ 洗牌', shuffleBtnRect.x + 15, shuffleBtnRect.y + shuffleBtnRect.h * 0.7);
-    ctx.font = `bold ${Math.max(10, Math.round(12 * (CARD_SIZE / BASE_CARD_SIZE)))}px "Segoe UI"`;
-    ctx.fillStyle = '#b16224';
-    ctx.fillText(`x${shuffleRemainingCount}`, shuffleBtnRect.x + shuffleBtnRect.w - 20, shuffleBtnRect.y + shuffleBtnRect.h * 0.6);
+    // 商店圖
+    if (shopImg && shopImg.complete) {
+        ctx.drawImage(shopImg, shopX, shopY, shopSize, shopSize);
+    }
 
-    // 丟回按鈕
-    ctx.fillStyle = '#ffdd99';
-    roundRect(ctx, throwBackBtnRect.x, throwBackBtnRect.y, throwBackBtnRect.w, throwBackBtnRect.h, 35);
-    ctx.fill();
-    ctx.fillStyle = '#4f2d0a';
-    ctx.font = `bold ${buttonFontSize}px "Segoe UI"`;
-    ctx.fillText('↩ 丟回', throwBackBtnRect.x + 15, throwBackBtnRect.y + throwBackBtnRect.h * 0.7);
-    ctx.font = `bold ${Math.max(10, Math.round(12 * (CARD_SIZE / BASE_CARD_SIZE)))}px "Segoe UI"`;
-    ctx.fillStyle = '#b16224';
-    ctx.fillText(`x${throwBackRemainingCount}`, throwBackBtnRect.x + throwBackBtnRect.w - 20, throwBackBtnRect.y + throwBackBtnRect.h * 0.6);
+    // Shelf 道具櫃（商店右側，填滿剩餘空間）
+    const shelfH = Math.round(shopSize * 1.2);
+    const shelfX = shopX + shopSize + 8;
+    const shelfW = Math.max(60, screenWidth - shelfX - 8);
+    const shelfAspect = 1100 / 228;
+    const shelfDrawH = Math.min(shelfH, shelfW / shelfAspect);
+    const shelfDrawW = shelfDrawH * shelfAspect;
+    const shelfY = Math.round(bottomCenterY - shelfDrawH / 2);
+    if (shelfImg && shelfImg.complete) {
+        ctx.drawImage(shelfImg, shelfX, shelfY, shelfDrawW, shelfDrawH);
+    }
+
+    // 繪製 shelf 內的道具圖標
+    const slotW = Math.round(shelfDrawW * 0.175);
+    const slotGapX = Math.round((shelfDrawW - slotW * 5) / 6);
+    const slotShift = [slotGapX * 1.5, slotGapX * 0.5, 0, -slotGapX * 0.5, -slotGapX * 1.5];
+    shelfSlots = [];
+    for (let i = 0; i < 5; i++) {
+        const sx = shelfX + slotGapX + (slotW + slotGapX) * i + slotShift[i];
+        const sy = shelfY + Math.round(shelfDrawH * 0.15);
+        const sw = slotW;
+        const sh = Math.round(shelfDrawH * 0.7);
+        const item = i < ownedItems.length ? ownedItems[i] : null;
+        shelfSlots.push({ x: sx, y: sy, w: sw, h: sh, item });
+
+        if (item) {
+            // 保持 1:1 比例，取最小邊長置中繪製
+            const iconS = Math.min(sw, sh);
+            const iconX = sx + (sw - iconS) / 2;
+            const iconY = sy + (sh - iconS) / 2;
+            const iconMap = { wash: 'washIcon', throw: 'throwIcon', switch: 'switchIcon', bomb: 'bombIcon', shake: 'shakeIcon', dance: 'danceIcon' };
+            const iconImg = loadedImages[iconMap[item]];
+            if (iconImg && iconImg.complete) {
+                ctx.drawImage(iconImg, iconX, iconY, iconS, iconS);
+            }
+        }
+    }
+
+    // === 購物面板（半透明遮罩 + 9 格商店） ===
+    if (shopOpen) {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(0, 0, screenWidth, screenHeight);
+
+        const panelW = Math.min(screenWidth * 0.88, 360);
+        const cols = 3;
+        const rows = 3;
+        const padding = Math.round(panelW * 0.06);
+        const gap = Math.round(panelW * 0.05);
+        const cellW = Math.round((panelW - padding * 2 - gap * (cols - 1)) / cols);
+        const cellH = Math.round(cellW * 1.1);
+        const headerH = Math.round(cellH * 0.7);
+        const panelH = headerH + padding + (cellH + gap) * rows + padding;
+        const panelX = (screenWidth - panelW) / 2;
+        const panelY = (screenHeight - panelH) / 2;
+
+        // 面板背景
+        ctx.fillStyle = '#fef3dd';
+        roundRect(ctx, panelX, panelY, panelW, panelH, 16);
+        ctx.fill();
+
+        // 標題
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#5a3c1a';
+        ctx.font = `bold ${Math.round(cellH * 0.28)}px "KaiTi"`;
+        ctx.fillText('道具商店', panelX + panelW / 2, panelY + headerH * 0.55);
+
+        // 關閉按鈕
+        const closeSize = Math.round(headerH * 0.45);
+        const closeX = panelX + panelW - closeSize - 10;
+        const closeY = panelY + 8;
+        shopCloseRect = { x: closeX, y: closeY, w: closeSize, h: closeSize };
+        ctx.fillStyle = '#d4a373';
+        roundRect(ctx, closeX, closeY, closeSize, closeSize, closeSize / 2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = `bold ${Math.round(closeSize * 0.7)}px "Segoe UI"`;
+        ctx.fillText('✕', closeX + closeSize / 2, closeY + closeSize * 0.75);
+        ctx.textAlign = 'left';
+
+        // 商品定義（目前只有 2 種，預留 9 格）
+        const shopItems = [
+            { name: 'wash', icon: 'washIcon', label: '洗牌', cost: 100 },
+            { name: 'throw', icon: 'throwIcon', label: '丟回', cost: 30 },
+            { name: 'switch', icon: 'switchIcon', label: '換座', cost: 50 },
+            { name: 'bomb', icon: 'bombIcon', label: '炸彈', cost: 200 },
+            { name: 'shake', icon: 'shakeIcon', label: '山崩', cost: 60 },
+            { name: 'dance', icon: 'danceIcon', label: '跳舞', cost: 70 },
+        ];
+        shopItemRects = [];
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const idx = r * cols + c;
+                const cx = panelX + padding + c * (cellW + gap);
+                const cy = panelY + headerH + padding + r * (cellH + gap);
+                const item = idx < shopItems.length ? shopItems[idx] : null;
+
+                if (item) {
+                    shopItemRects.push({ x: cx, y: cy, w: cellW, h: cellH, name: item.name, cost: item.cost });
+
+                    // 格子背景
+                    ctx.fillStyle = '#fff8ed';
+                    roundRect(ctx, cx, cy, cellW, cellH, 10);
+                    ctx.fill();
+                    ctx.strokeStyle = '#d4c4a0';
+                    ctx.lineWidth = 1;
+                    roundRect(ctx, cx, cy, cellW, cellH, 10);
+                    ctx.stroke();
+
+                    // 道具圖標
+                    const iconImg = loadedImages[item.icon];
+                    const iconS = Math.round(cellW * 0.5);
+                    const iconX = cx + (cellW - iconS) / 2;
+                    const iconY = cy + Math.round(cellH * 0.06);
+                    if (iconImg && iconImg.complete) {
+                        ctx.drawImage(iconImg, iconX, iconY, iconS, iconS);
+                    }
+
+                    // 名稱
+                    ctx.textAlign = 'center';
+                    ctx.font = `bold ${Math.round(cellH * 0.14)}px "Segoe UI"`;
+                    ctx.fillStyle = '#4a2e0a';
+                    ctx.fillText(item.label, cx + cellW / 2, cy + cellH * 0.68);
+
+                    // 價格
+                    ctx.font = `${Math.round(cellH * 0.13)}px "Segoe UI"`;
+                    ctx.fillStyle = '#b16224';
+                    ctx.fillText(`💰 ${item.cost}`, cx + cellW / 2, cy + cellH * 0.88);
+                    ctx.textAlign = 'left';
+                }
+            }
+        }
+    }
 
     // === 繪製右上角得分面板 ===
     const coinImg = loadedImages['coin'];
@@ -1959,30 +2623,70 @@ function renderUI() {
         const centerX = screenWidth / 2;
         const centerY = screenHeight / 2;
 
-        // 遊戲結束標題
-        ctx.textAlign = 'center';
-        ctx.font = 'bold 40px "Segoe UI"';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('遊戲結束', centerX, centerY - 60);
+        if (gameOverState === 'win') {
+            // === 通關畫面 ===
+            const winImg = loadedImages['win'];
+            const imgH = Math.min(screenHeight * 0.42, 400);
+            const imgW = imgH * (winImg ? winImg.width / winImg.height : 1);
+            const imgX = centerX - imgW / 2;
+            const imgY = centerY - imgH * 0.55;
 
-        // 再來一次按鈕
-        const btnW = Math.min(200, screenWidth * 0.5);
-        const btnH = Math.min(50, screenHeight * 0.07);
-        const btnX = centerX - btnW / 2;
-        const btnY = centerY;
-        gameOverBtnRect = { x: btnX, y: btnY, w: btnW, h: btnH };
+            if (winImg && winImg.complete) {
+                ctx.drawImage(winImg, imgX, imgY, imgW, imgH);
+            }
 
-        ctx.fillStyle = '#ffdd99';
-        roundRect(ctx, btnX, btnY, btnW, btnH, 14);
-        ctx.fill();
-        ctx.fillStyle = '#5a3c1a';
-        ctx.font = `bold ${Math.min(18, Math.round(btnH * 0.42))}px "Segoe UI"`;
-        ctx.fillText('再來一次', centerX, btnY + btnH * 0.65);
+            ctx.textAlign = 'center';
+            ctx.font = 'bold 36px "KaiTi", "華文楷書"';
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText('太棒了！', centerX, imgY + imgH + 36);
 
-        // 激勵文字
-        ctx.fillStyle = '#ffeebb';
-        ctx.font = `${Math.min(18, Math.round(screenWidth * 0.045))}px "KaiTi", "華文楷書"`;
-        ctx.fillText('我就不信過不了！', centerX, btnY + btnH + 30);
+            const btnW = Math.min(200, screenWidth * 0.5);
+            const btnH = Math.min(50, screenHeight * 0.07);
+            const btnX = centerX - btnW / 2;
+            const btnY = imgY + imgH + 55;
+            gameOverBtnRect = { x: btnX, y: btnY, w: btnW, h: btnH };
+
+            ctx.fillStyle = '#ffdd99';
+            roundRect(ctx, btnX, btnY, btnW, btnH, 14);
+            ctx.fill();
+            ctx.fillStyle = '#5a3c1a';
+            ctx.font = `bold ${Math.min(18, Math.round(btnH * 0.42))}px "Segoe UI"`;
+            ctx.fillText('下一關', centerX, btnY + btnH * 0.65);
+
+        } else {
+            // === 失敗畫面 ===
+            const failImg = loadedImages['fail'];
+            const imgH = Math.min(screenHeight * 0.42, 400);
+            const imgW = imgH * 541 / 800;
+            const imgX = centerX - imgW / 2;
+            const imgY = centerY - imgH * 0.55;
+
+            if (failImg && failImg.complete) {
+                ctx.drawImage(failImg, imgX, imgY, imgW, imgH);
+            }
+
+            ctx.textAlign = 'center';
+            ctx.font = 'bold 36px "KaiTi", "華文楷書"';
+            ctx.fillStyle = '#ffffff';
+            ctx.fillText('倉庫滿了', centerX, imgY + imgH + 36);
+
+            const btnW = Math.min(200, screenWidth * 0.5);
+            const btnH = Math.min(50, screenHeight * 0.07);
+            const btnX = centerX - btnW / 2;
+            const btnY = imgY + imgH + 55;
+            gameOverBtnRect = { x: btnX, y: btnY, w: btnW, h: btnH };
+
+            ctx.fillStyle = '#ffdd99';
+            roundRect(ctx, btnX, btnY, btnW, btnH, 14);
+            ctx.fill();
+            ctx.fillStyle = '#5a3c1a';
+            ctx.font = `bold ${Math.min(18, Math.round(btnH * 0.42))}px "Segoe UI"`;
+            ctx.fillText('再來一次', centerX, btnY + btnH * 0.65);
+
+            ctx.fillStyle = '#ffeebb';
+            ctx.font = `${Math.min(18, Math.round(screenWidth * 0.045))}px "KaiTi", "華文楷書"`;
+            ctx.fillText('我就不信過不了！', centerX, btnY + btnH + 30);
+        }
 
         ctx.textAlign = 'left';
     }
@@ -2053,39 +2757,91 @@ function onTouchStart(e) {
 
         return;
     }
-    // 检查屏幕坐标系下的按钮（不需要坐标转换）
-    // 检查洗牌按钮
-    if (shuffleBtnRect &&
-        x >= shuffleBtnRect.x && x <= shuffleBtnRect.x + shuffleBtnRect.w &&
-        y >= shuffleBtnRect.y && y <= shuffleBtnRect.y + shuffleBtnRect.h) {
-        shuffleRemaining();
+    // 購物面板打開時，只處理面板內點擊
+    if (shopOpen) {
+        // 關閉按鈕
+        if (x >= shopCloseRect.x && x <= shopCloseRect.x + shopCloseRect.w &&
+            y >= shopCloseRect.y && y <= shopCloseRect.y + shopCloseRect.h) {
+            shopOpen = false;
+            return;
+        }
+        // 商品點擊
+        for (let r of shopItemRects) {
+            if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+                buyItem(r.name);
+                shopOpen = false;
+                return;
+            }
+        }
+        // 面板外點擊關閉
+        shopOpen = false;
         return;
     }
 
-    // 检查丟回按钮
-    if (throwBackBtnRect &&
-        x >= throwBackBtnRect.x && x <= throwBackBtnRect.x + throwBackBtnRect.w &&
-        y >= throwBackBtnRect.y && y <= throwBackBtnRect.y + throwBackBtnRect.h) {
-        throwBackLastSlotCard();
+    // 檢查商店圖（點擊打開購物面板）
+    if (gameActive && shopWashRect &&
+        x >= shopWashRect.x && x <= shopWashRect.x + shopWashRect.w &&
+        y >= shopWashRect.y && y <= shopWashRect.y + shopWashRect.h) {
+        shopOpen = true;
         return;
     }
-    // 檢查設定按鈕（使用屏幕坐標，不需要轉換）
-    if (settingsBtnRect &&
+
+    // 檢查 shelf 道具櫃（使用道具，使用後從櫃中移除）
+    for (let si = 0; si < shelfSlots.length; si++) {
+        const slot = shelfSlots[si];
+        if (slot.item && gameActive &&
+            x >= slot.x && x <= slot.x + slot.w &&
+            y >= slot.y && y <= slot.y + slot.h) {
+            const used = slot.item;
+            if (used === 'wash') {
+                shuffleRemaining();
+            } else if (used === 'throw') {
+                throwBackLastSlotCard();
+            } else if (used === 'switch') {
+                ownedItems.splice(si, 1);
+                toggleBase();
+            } else if (used === 'bomb') {
+                useBomb(si);
+            } else if (used === 'shake') {
+                ownedItems.splice(si, 1);
+                useShake();
+            } else if (used === 'dance') {
+                ownedItems.splice(si, 1);
+                useDance();
+            }
+            return;
+        }
+    }
+    // 檢查設定按鈕（遊戲中才能按）
+    if (gameActive && settingsBtnRect &&
         x >= settingsBtnRect.x && x <= settingsBtnRect.x + settingsBtnRect.w &&
         y >= settingsBtnRect.y && y <= settingsBtnRect.y + settingsBtnRect.h) {
         toggleSettings();
         return;
     }
 
-    // 遊戲結束畫面：再來一次按鈕
+    // 遊戲結束畫面按鈕
     if (!gameActive && gameOverBtnRect &&
         x >= gameOverBtnRect.x && x <= gameOverBtnRect.x + gameOverBtnRect.w &&
         y >= gameOverBtnRect.y && y <= gameOverBtnRect.y + gameOverBtnRect.h) {
-        resetGame();
+        if (gameOverState === 'win') {
+            // 下一關
+            if (currentLevel < TOTAL_LEVELS) {
+                currentLevel++;
+            } else {
+                currentLevel = 1;
+                totalScore = 2000;  // 測試階段初始金幣
+            }
+            resetToolCounts();
+            loadLevel(currentLevel, true);
+        } else {
+            // 再來一次
+            resetGame();
+        }
         return;
     }
 
-    if (!gameActive) return;
+    if (!gameActive || shopOpen) return;
 
     // 轉換遊戲坐標（用於點擊卡牌）
     let gameX = (x - offsetX) / cardScale;
@@ -2103,35 +2859,6 @@ function onTouchStart(e) {
     }
 }
 
-function onTouchEnd(e) {
-    let t = e.changedTouches[0];
-
-    // 如果設定面板打開，不處理遊戲按鈕
-    if (settingsVisible) return;
-
-    // 使用屏幕坐標
-    let x = t.clientX;
-    let y = t.clientY;
-
-    // 轉換遊戲坐標
-    let gameX = (x - offsetX) / cardScale;
-    let gameY = (y - offsetY) / cardScale;
-
-    // 檢查洗牌和丟回按鈕
-    if (shuffleBtnRect &&
-        gameX >= shuffleBtnRect.x && gameX <= shuffleBtnRect.x + shuffleBtnRect.w &&
-        gameY >= shuffleBtnRect.y && gameY <= shuffleBtnRect.y + shuffleBtnRect.h) {
-        // 已經在 onTouchStart 中處理，避免重複
-        return;
-    }
-
-    if (throwBackBtnRect &&
-        gameX >= throwBackBtnRect.x && gameX <= throwBackBtnRect.x + throwBackBtnRect.w &&
-        gameY >= throwBackBtnRect.y && gameY <= throwBackBtnRect.y + throwBackBtnRect.h) {
-        // 已經在 onTouchStart 中處理，避免重複
-        return;
-    }
-}
 function init() {
     canvas = wx.createCanvas();
 
@@ -2167,7 +2894,6 @@ function init() {
     offsetY = 0;
 
     wx.onTouchStart(onTouchStart);
-    wx.onTouchEnd(onTouchEnd);
 
     // 加載分包資源後初始化音效和圖片
     wx.showLoading({ title: '載入中...' });
@@ -2178,7 +2904,7 @@ function init() {
             wx.hideLoading();
             initAudio();
             loadCardImages().then(() => {
-                totalScore = 0;
+                totalScore = 2000;  // 測試階段初始金幣
                 currentRoundScore = 0;
                 loadLevel(1, false);
                 startGameLoop();
@@ -2190,7 +2916,7 @@ function init() {
             // 嘗試降級：可能資源還在主包
             initAudio();
             loadCardImages().then(() => {
-                totalScore = 0;
+                totalScore = 2000;  // 測試階段初始金幣
                 currentRoundScore = 0;
                 loadLevel(1, false);
                 startGameLoop();
@@ -2210,6 +2936,9 @@ function startGameLoop() {
         updateShuffleAnimations();
         updateActionAnimations();
         updateThrowActionAnimations();
+        updateBombAnimations();
+        updateShakeAnimations();
+        updateDanceAnimations();
         renderUI();
         requestAnimationFrame(frame);
     }
