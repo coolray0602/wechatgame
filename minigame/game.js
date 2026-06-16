@@ -970,11 +970,13 @@ function generateLevel(level) {
         }
     }
 
+    // 確保卡片總數是 3 的倍數（多退少補）
     let total = cards.length;
     let remainder = total % 3;
     if (remainder !== 0) {
         let need = 3 - remainder;
-        for (let attempt = 0; attempt < need; attempt++) {
+        // 先嘗試補牌
+        for (let attempt = 0; attempt < need * 5; attempt++) {
             let added = false;
             for (let layer = cfg.layers - 1; layer >= 0 && !added; layer--) {
                 let offsetDir = layerDirs[layer];
@@ -985,31 +987,34 @@ function generateLevel(level) {
                 }
                 for (let base of shuffledBase) {
                     if (isPositionForbidden(base.x, base.y)) continue;
-
                     let candidateX = base.x;
                     let candidateY = base.y;
                     if (layer > 0 && offsetDir !== -1) {
                         let offset = getOffsetPositionByDir(base, offsetDir);
-                        if (offset) {
-                            candidateX = offset.x;
-                            candidateY = offset.y;
-                        }
+                        if (offset) { candidateX = offset.x; candidateY = offset.y; }
                     }
                     let occupied = false;
                     for (let c of cards) {
                         if (c.layer === layer && Math.abs(c.x - candidateX) < 1 && Math.abs(c.y - candidateY) < 1) {
-                            occupied = true;
-                            break;
+                            occupied = true; break;
                         }
                     }
                     if (occupied) continue;
                     if (!doesOverlap(candidateX, candidateY, layer, cards)) {
                         cards.push({ id: id++, x: candidateX, y: candidateY, layer: layer });
-                        added = true;
-                        break;
+                        added = true; break;
                     }
                 }
             }
+            if (!added) break;  // 实在补不了就停止
+        }
+        // 仍有余数则从最高层删除多余卡片
+        total = cards.length;
+        if (total % 3 !== 0) {
+            let excess = total % 3;
+            // 按从高层到低层、从末尾开始删
+            cards.sort((a, b) => b.layer - a.layer);
+            cards.splice(0, excess);
         }
     }
     return { cards };
