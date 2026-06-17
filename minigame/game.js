@@ -406,6 +406,34 @@ let entranceAnimations = [];
 let landingEffects = [];
 let gameOverState = null;  // null | 'win' | 'fail'
 
+// ==================== 辅助函数 ====================
+// 检查是否有任何卡牌正在移动（下落、炸弹、飞入卡槽等），期间禁止操作道具
+function isAnyCardMoving() {
+    if (entranceAnimations.length > 0) return true;
+    if (bombAnimations.length > 0) return true;
+    if (activeAnimations.length > 0) return true;
+    if (throwBackAnimations.length > 0) return true;
+    if (shuffleAnimations.length > 0) return true;
+    if (danceAnimations.length > 0) return true;
+    for (let c of stackCards) {
+        if (c.isAnimating) return true;
+    }
+    return false;
+}
+
+// 检查是否禁止点击卡牌（比道具限制更宽松：纯视觉动画不阻塞操作）
+function isClickBlocked() {
+    if (entranceAnimations.length > 0) { console.log('[ClickBlocked] entranceAnimations:', entranceAnimations.length); return true; }
+    if (bombAnimations.length > 0) { console.log('[ClickBlocked] bombAnimations:', bombAnimations.length); return true; }
+    if (throwBackAnimations.length > 0) { console.log('[ClickBlocked] throwBackAnimations:', throwBackAnimations.length); return true; }
+    if (shuffleAnimations.length > 0) { console.log('[ClickBlocked] shuffleAnimations:', shuffleAnimations.length); return true; }
+    if (danceAnimations.length > 0) { console.log('[ClickBlocked] danceAnimations:', danceAnimations.length); return true; }
+    // activeAnimations、actionAnimations、throwActionAnimations 不阻止点击：
+    // - 飞入卡槽时允许继续点其他牌
+    // - 三消角色行走 / 扔回精灵是纯视觉，不改变卡牌状态
+    return false;
+}
+
 // ==================== 全域变数 ====================
 let canvas, ctx;
 let gameActive = true;
@@ -1381,11 +1409,13 @@ function updateShakeAnimations() {
 
 function useBomb(shelfIndex) {
     if (!gameActive) return;
+    if (isAnyCardMoving()) return;
     // 从柜中移除
     if (shelfIndex < ownedItems.length && ownedItems[shelfIndex] === 'bomb') {
         ownedItems.splice(shelfIndex, 1);
     }
-    let active = stackCards.filter(c => !c.removed && !c.isAnimating);
+    // 排除已标记 willRemove 的牌（上一次炸弹的残留），避免重复计数
+    let active = stackCards.filter(c => !c.removed && !c.isAnimating && !c.willRemove);
     if (active.length === 0) return;
 
     // 隨机选一个位置
@@ -1393,42 +1423,75 @@ function useBomb(shelfIndex) {
     const targetX = targetCard.x;
     const targetY = targetCard.y;
 
-    // 收集該位置附近最多 5 張牌
-    let nearby = active.filter(c => {
+    // 统计卡槽中各类型数量（卡槽中的牌迟早要凑满 3 张，不能误清）
+    let slotCount = {};
+    for (let ic of slotCards) {
+        slotCount[ic] = (slotCount[ic] || 0) + 1;
+    }
+    // 显示卡槽状态（调试用）
+    let slotDebug = Object.entries(slotCount).map(([k,v]) => `${k}×${v}`).join(', ') || '(空)';
+    console.log(`[炸弹调试] 卡槽: [${slotDebug}]`);
+
+    // 收集該位置附近最多 5 張牌，优先选卡槽不需要的牌
+    let allNearby = active.filter(c => {
         const dist = Math.hypot(c.x - targetX, c.y - targetY);
         return dist < CARD_SIZE * 0.9;
     });
-    nearby.sort((a, b) => b.layer - a.layer);
-    nearby = nearby.slice(0, 5);
-
-    // 确保每种类型都是 3 的倍数：从其他位置移除多余的牌
-    let removedIcons = nearby.map(c => c.icon);
-    let allIcons = active.map(c => c.icon);
-
-    // 检查 removed 后的剩余是否都是 3 的倍数
-    let remainingIcons = [...allIcons];
-    for (let ic of removedIcons) {
-        const idx = remainingIcons.indexOf(ic);
-        if (idx !== -1) remainingIcons.splice(idx, 1);
+    allNearby.sort((a, b) => b.layer - a.layer);
+    let nearbySafe = [];  // 卡槽不需要的牌，可以安全移除
+    let nearbyRisky = []; // 卡槽正在等待的牌，尽量保留
+    for (let c of allNearby) {
+        let need = (3 - (slotCount[c.icon] || 0) % 3) % 3;
+        if (need === 0) nearbySafe.push(c);
+        else nearbyRisky.push(c);
     }
+    let nearby = [...nearbySafe, ...nearbyRisky].slice(0, 5);
 
-    // 找出需要額外移除的牌
-    let count = new Map();
-    for (let ic of remainingIcons) count.set(ic, (count.get(ic) || 0) + 1);
+    // 统计牌桌各类型数量
+    let boardCount = {};
+    for (let c of active) boardCount[c.icon] = (boardCount[c.icon] || 0) + 1;
+    // 统计 nearby 中各类型数量
+    let nearbyCount = {};
+    for (let c of nearby) nearbyCount[c.icon] = (nearbyCount[c.icon] || 0) + 1;
+
+    // 调试：显示牌桌总数和 nearby
+    let boardDebug = Object.entries(boardCount).map(([k,v]) => `${k}×${v}`).join(', ');
+    let nearbyDebug = Object.entries(nearbyCount).map(([k,v]) => `${k}×${v}`).join(', ') || '(空)';
+    console.log(`[炸弹调试] 牌桌总数(${active.length}张): [${boardDebug}]`);
+    console.log(`[炸弹调试] nearby(${nearby.length}张): [${nearbyDebug}]`);
+
+    // 计算每种类型需要从牌桌额外移除多少张，使（卡槽 + 剩余牌桌）为 3 的倍数
     let extraToRemove = [];
-    for (let [ic, cnt] of count) {
-        while (cnt % 3 !== 0 && cnt > 0) {
-            cnt--;
-            extraToRemove.push(ic);
+    let extraDebug = [];
+    for (let icon of Object.keys(boardCount)) {
+        let slotCnt = slotCount[icon] || 0;
+        let nearbyCnt = nearbyCount[icon] || 0;
+        let remainingBoard = boardCount[icon] - nearbyCnt;
+        let totalAfter = slotCnt + remainingBoard;
+        let extra = ((totalAfter % 3) + 3) % 3;
+        for (let i = 0; i < extra; i++) extraToRemove.push(icon);
+        if (extra > 0) {
+            extraDebug.push(`${icon}: 卡槽${slotCnt} + 剩余${remainingBoard} = ${totalAfter} → 需额外移除${extra}`);
         }
     }
+    console.log(`[炸弹调试] 需要额外移除: [${extraToRemove.join(', ') || '(无)'}]`);
+    if (extraDebug.length > 0) console.log(`[炸弹调试] 详情: ${extraDebug.join('; ')}`);
 
     let extraCards = active.filter(c => !nearby.includes(c));
     let finalRemove = [...nearby];
+    let missedExtras = [];
     for (let ic of extraToRemove) {
         let found = extraCards.find(c => c.icon === ic && !finalRemove.includes(c));
         if (found) finalRemove.push(found);
+        else missedExtras.push(ic);
     }
+    if (missedExtras.length > 0) {
+        console.warn(`[炸弹调试] ⚠️ 未能找到额外移除目标: [${missedExtras.join(', ')}]（可能已被nearby清空）`);
+    }
+    console.log(`[炸弹调试] 最终移除(${finalRemove.length}张): ${(() => {
+        let m = {}; for (let c of finalRemove) m[c.icon] = (m[c.icon]||0)+1;
+        return Object.entries(m).map(([k,v]) => `${k}×${v}`).join(', ');
+    })()}`);
 
     // 标記为等待爆炸后飛走（不设 isAnimating，卡牌仍正常显示）
     for (let c of finalRemove) {
@@ -1536,12 +1599,21 @@ function updateBombAnimations() {
 
     for (let idx of completed.reverse()) {
         const anim = bombAnimations[idx];
+        // 统计被炸弹移除的卡牌
+        const removedCount = new Map();
         for (let c of anim.cards) {
+            const key = c.icon;
+            removedCount.set(key, (removedCount.get(key) || 0) + 1);
             c.removed = true;
             delete c.willRemove;
             delete c.isAnimating;
             delete c._flyDir;
         }
+        const logParts = [];
+        for (let [icon, cnt] of removedCount) {
+            logParts.push(`${icon} ×${cnt}`);
+        }
+        console.log(`💣 炸弹移除: ${logParts.join(', ')}`);
         bombAnimations.splice(idx, 1);
         updateAllCardsClickable();
         checkGameEnd();
@@ -1664,7 +1736,8 @@ function startCardAnimation(card, fromX, fromY, toX, toY) {
     // 立即更新可点击状态：让被蓋住的牌立刻变为可取
     updateAllCardsClickable();
 
-    const scaleStartTime = Date.now();
+    const now = Date.now();
+    const haloDuration = 250;  // 白色光圈持续时间（ms）
     const scaleDuration = 200;
 
     const animObj = {
@@ -1673,12 +1746,16 @@ function startCardAnimation(card, fromX, fromY, toX, toY) {
         fromY: fromY,
         toX: toX,
         toY: toY,
-        startTime: scaleStartTime,
+        startTime: now,
+        haloDuration: haloDuration,
         scaleDuration: scaleDuration,
         flyDuration: 500,
-        phase: 'scale',
+        phase: 'halo',  // 新增 halo 阶段：先显示白色光圈
         scale: 1,
-        startScale: 1
+        startScale: 1,
+        // 光圈中心（卡牌中心坐标）
+        haloCX: fromX + CARD_SIZE / 2,
+        haloCY: fromY + CARD_SIZE / 2
     };
 
     activeAnimations.push(animObj);
@@ -1691,8 +1768,18 @@ function updateAnimations() {
     for (let i = 0; i < activeAnimations.length; i++) {
         const anim = activeAnimations[i];
 
-        if (anim.phase === 'scale') {
+        // halo 阶段：白色光圈扩散消失，持续 haloDuration 后才进入 scale 阶段
+        if (anim.phase === 'halo') {
             const elapsed = now - anim.startTime;
+            if (elapsed >= anim.haloDuration) {
+                anim.phase = 'scale';
+                anim.scaleStartTime = now;
+            }
+        }
+
+        if (anim.phase === 'scale') {
+            const scaleStartTime = anim.scaleStartTime || anim.startTime;
+            const elapsed = now - scaleStartTime;
             if (elapsed < anim.scaleDuration) {
                 let t = elapsed / anim.scaleDuration;
                 if (t < 0.5) {
@@ -2004,6 +2091,7 @@ function getSlotCardPosition(index) {
 function onCardClick(card) {
     if (!gameActive || !card.clickable) return;
     if (card.isAnimating) return;
+    if (isClickBlocked()) return;
 
     // 计算卡槽中目标卡牌的位置
     const projectedSlotCards = getProjectedSlotCards();
@@ -2369,6 +2457,46 @@ function drawCard(ctx, card, x, y, scale = 1, alpha = 1, isAnimating = false, ro
     ctx.restore();
 }
 
+function drawClickHalos(ctx) {
+    const now = Date.now();
+    for (let anim of activeAnimations) {
+        if (anim.phase !== 'halo') continue;
+        const elapsed = now - anim.startTime;
+        const progress = Math.min(elapsed / anim.haloDuration, 1);
+
+        const cx = anim.haloCX;
+        const cy = anim.haloCY;
+
+        // 外圈：快速扩散并消失
+        const outerRadius = CARD_SIZE * (0.55 + progress * 0.65);
+        const outerAlpha = (1 - progress) * 0.85;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(cx, cy, outerRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${outerAlpha})`;
+        ctx.lineWidth = Math.max(2, CARD_SIZE * 0.1 * (1 - progress * 0.6));
+        ctx.stroke();
+
+        // 内圈光晕（短暂强亮，迅速消失）
+        if (progress < 0.5) {
+            const innerProgress = progress / 0.5;
+            const innerAlpha = (1 - innerProgress) * 0.45;
+            const innerRadius = CARD_SIZE * (0.45 + innerProgress * 0.25);
+            const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, innerRadius);
+            grad.addColorStop(0, `rgba(255, 255, 255, ${innerAlpha})`);
+            grad.addColorStop(0.5, `rgba(255, 255, 255, ${innerAlpha * 0.5})`);
+            grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.restore();
+    }
+}
+
 function drawLandingEffects(ctx) {
     const now = Date.now();
 
@@ -2686,10 +2814,10 @@ function renderUI() {
     for (let anim of activeAnimations) {
         const card = anim.card;
         let x, y, scale, rotation;
-        if (anim.phase === 'scale') {
+        if (anim.phase === 'halo' || anim.phase === 'scale') {
             x = anim.fromX;
             y = anim.fromY;
-            scale = anim.scale;
+            scale = anim.phase === 'scale' ? anim.scale : 1;
             rotation = 0;
         } else {
             x = anim.currentX;
@@ -2699,6 +2827,9 @@ function renderUI() {
         }
         drawCard(ctx, card, x, y, scale, 1, true, rotation);
     }
+
+    // 绘制点击白色光圈
+    drawClickHalos(ctx);
 
     for (let anim of throwBackAnimations) {
         drawCard(ctx, { icon: anim.icon }, anim.currentX, anim.currentY, 1, 1, true, anim.rotation || 0);
@@ -2836,6 +2967,11 @@ function renderUI() {
         ctx.font = `bold ${Math.round(cellH * 0.28)}px "KaiTi"`;
         ctx.fillText('道具商店', panelX + panelW / 2, panelY + headerH * 0.55);
 
+        // 副标題：提示
+        ctx.font = `${Math.round(cellH * 0.16)}px "Segoe UI"`;
+        ctx.fillStyle = '#8a7a6a';
+        ctx.fillText('已購買道具不會帶到下一關哦', panelX + panelW / 2, panelY + headerH * 0.85);
+
         // 关闭按鈕
         const closeSize = Math.round(headerH * 0.45);
         const closeX = panelX + panelW - closeSize - 10;
@@ -2901,7 +3037,7 @@ function renderUI() {
                     // 价格（已购买显示已擁有）
                     ctx.font = `${Math.round(cellH * 0.13)}px "Segoe UI"`;
                     ctx.fillStyle = isOwned ? '#b0a898' : '#b16224';
-                    ctx.fillText(isOwned ? '已持有' : `💰 ${item.cost}`, cx + cellW / 2, cy + cellH * 0.88);
+                    ctx.fillText(isOwned ? '賣完了' : `💰 ${item.cost}`, cx + cellW / 2, cy + cellH * 0.88);
                     ctx.textAlign = 'left';
                 }
             }
@@ -3041,7 +3177,7 @@ function renderUI() {
             ctx.fillStyle = '#ffffff';
             ctx.font = `bold ${Math.min(16, Math.round(btnH * 0.45))}px "Segoe UI"`;
             ctx.textBaseline = 'middle';
-            ctx.fillText('保存并暂离', centerX, b1y + btnH / 2);
+            ctx.fillText('存档', centerX, b1y + btnH / 2);
 
             // 按鈕2：继续挑战
             const b2y = b1y + btnH + btnGap;
@@ -3050,7 +3186,7 @@ function renderUI() {
             roundRect(ctx, gameOverBtn2Rects[gameOverBtn2Rects.length - 1].x, b2y, btnW, btnH, 12);
             ctx.fill();
             ctx.fillStyle = '#ffffff';
-            ctx.fillText('继续挑战', centerX, b2y + btnH / 2);
+            ctx.fillText('下一关', centerX, b2y + btnH / 2);
 
             // 按鈕3：帶著金币撤离
             const b3y = b2y + btnH + btnGap;
@@ -3260,7 +3396,7 @@ function onTouchStart(e) {
     // 检查 shelf 道具柜（使用道具，使用后从柜中移除）
     for (let si = 0; si < shelfSlots.length; si++) {
         const slot = shelfSlots[si];
-        if (slot.item && gameActive &&
+        if (slot.item && gameActive && !isAnyCardMoving() &&
             x >= slot.x && x <= slot.x + slot.w &&
             y >= slot.y && y <= slot.y + slot.h) {
             const used = slot.item;
@@ -3360,7 +3496,9 @@ function onTouchStart(e) {
         return;
     }
 
-    if (!gameActive || shopOpen) return;
+    if (!gameActive) { console.log('[TouchStart] gameActive=false'); return; }
+    if (shopOpen) { console.log('[TouchStart] shopOpen=true'); return; }
+    if (isClickBlocked()) { console.log('[TouchStart] 被 isClickBlocked 拦截'); return; }
 
     // 转换游戏坐标（用于点击卡牌）
     let gameX = (x - offsetX) / cardScale;
